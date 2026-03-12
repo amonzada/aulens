@@ -1,0 +1,45 @@
+name: aulens
+description: "A student note-taking app that organises whiteboard photos by subject automatically."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # Local database
+  sqflite: ^2.4.0
+  path: ^1.9.1
+
+  # File system paths
+  path_provider: ^2.1.5
+
+  # State management
+  provider: ^6.1.2
+
+  # Camera & image picking
+  image_picker: ^1.1.2
+
+  # OCR text recognition (Google ML Kit – on-device, no Firebase needed)
+  google_mlkit_text_recognition: ^0.13.0
+
+  # Date / time formatting
+  intl: ^0.20.1
+
+  # PDF generation
+  pdf: ^3.11.1
+
+  # Runtime permission handling
+  permission_handler: ^11.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
