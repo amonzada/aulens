@@ -16,7 +16,7 @@ class AddSchedulePage extends StatefulWidget {
 }
 
 class _AddSchedulePageState extends State<AddSchedulePage> {
-  int _weekday = 1; // 1 = Monday
+  final Set<int> _weekdays = {1}; // 1 = Monday
   TimeOfDay _start = const TimeOfDay(hour: 8, minute: 0);
   TimeOfDay _end = const TimeOfDay(hour: 10, minute: 0);
   bool _saving = false;
@@ -55,6 +55,13 @@ class _AddSchedulePageState extends State<AddSchedulePage> {
   }
 
   Future<void> _save() async {
+    if (_weekdays.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select at least one day.')),
+      );
+      return;
+    }
+
     if (_mins(_start) >= _mins(_end)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('End time must be after start time.')),
@@ -62,14 +69,18 @@ class _AddSchedulePageState extends State<AddSchedulePage> {
       return;
     }
     setState(() => _saving = true);
-    await context.read<ScheduleProvider>().addScheduleEntry(
-          ScheduleEntry(
+    final entries = _weekdays
+        .map(
+          (day) => ScheduleEntry(
             subjectId: widget.subject.id!,
-            weekday: _weekday,
+            weekday: day,
             startTime: _fmt(_start),
             endTime: _fmt(_end),
           ),
-        );
+        )
+        .toList();
+
+    await context.read<ScheduleProvider>().addScheduleEntries(entries);
     if (mounted) Navigator.pop(context);
   }
 
@@ -84,21 +95,31 @@ class _AddSchedulePageState extends State<AddSchedulePage> {
         padding: const EdgeInsets.all(24),
         children: [
           // ── Day picker ────────────────────────────────────────────────────
-          Text('Day of the week', style: theme.textTheme.labelLarge),
+          Text('Days of the week', style: theme.textTheme.labelLarge),
           const SizedBox(height: 8),
-          DropdownButtonFormField<int>(
-            initialValue: _weekday,
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.calendar_today_outlined),
-            ),
-            items: List.generate(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: List.generate(
               7,
-              (i) => DropdownMenuItem(
-                value: i + 1,
-                child: Text(AppConstants.weekdayNames[i]),
-              ),
+              (i) {
+                final day = i + 1;
+                final selected = _weekdays.contains(day);
+                return FilterChip(
+                  label: Text(AppConstants.weekdayNames[i]),
+                  selected: selected,
+                  onSelected: (isSelected) {
+                    setState(() {
+                      if (isSelected) {
+                        _weekdays.add(day);
+                      } else {
+                        _weekdays.remove(day);
+                      }
+                    });
+                  },
+                );
+              },
             ),
-            onChanged: (v) => setState(() => _weekday = v!),
           ),
           const SizedBox(height: 24),
 

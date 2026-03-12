@@ -35,6 +35,14 @@ class PdfExportService {
     final noteWidgets = <pw.Widget>[];
     for (final note in notes) {
       final imageWidget = await _buildImageWidget(note.imagePath);
+      final textLabel = note.isTextNote ? 'Note' : 'OCR Text';
+      final textBody = note.isTextNote
+          ? (note.textContent == null || note.textContent!.trim().isEmpty)
+              ? 'No text available.'
+              : note.textContent!
+          : (note.ocrText == null || note.ocrText!.trim().isEmpty)
+              ? 'No extracted text.'
+              : note.ocrText!;
       noteWidgets.add(
         pw.Container(
           margin: const pw.EdgeInsets.only(bottom: 14),
@@ -57,7 +65,7 @@ class PdfExportService {
               imageWidget,
               pw.SizedBox(height: 8),
               pw.Text(
-                'OCR Text',
+                textLabel,
                 style: pw.TextStyle(
                   fontWeight: pw.FontWeight.bold,
                   fontSize: 10,
@@ -66,9 +74,7 @@ class PdfExportService {
               ),
               pw.SizedBox(height: 4),
               pw.Text(
-                (note.ocrText == null || note.ocrText!.trim().isEmpty)
-                    ? 'No extracted text.'
-                    : note.ocrText!,
+                textBody,
                 style: const pw.TextStyle(fontSize: 10),
               ),
             ],
@@ -140,7 +146,11 @@ class PdfExportService {
     return outFile.path;
   }
 
-  Future<pw.Widget> _buildImageWidget(String imagePath) async {
+  Future<pw.Widget> _buildImageWidget(String? imagePath) async {
+    if (imagePath == null || imagePath.trim().isEmpty) {
+      return _placeholder('Text note');
+    }
+
     if (!await _isManagedImagePath(imagePath)) {
       return _placeholder('Image path is outside managed storage');
     }

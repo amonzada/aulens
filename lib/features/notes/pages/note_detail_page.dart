@@ -35,22 +35,24 @@ class NoteDetailPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ── Photo ──────────────────────────────────────────────────────
-            AspectRatio(
-              aspectRatio: 4 / 3,
-              child: Image.file(
-                File(note.imagePath),
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  color: cs.surfaceContainerHighest,
-                  child: Icon(
-                    Icons.broken_image_outlined,
-                    size: 56,
-                    color: cs.outlineVariant,
+            if (note.hasImage) ...[
+              // ── Photo ──────────────────────────────────────────────────
+              AspectRatio(
+                aspectRatio: 4 / 3,
+                child: Image.file(
+                  File(note.imagePath!),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    color: cs.surfaceContainerHighest,
+                    child: Icon(
+                      Icons.broken_image_outlined,
+                      size: 56,
+                      color: cs.outlineVariant,
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
 
             Padding(
               padding: const EdgeInsets.all(16),
@@ -72,22 +74,31 @@ class NoteDetailPage extends StatelessWidget {
                   ],
                   const SizedBox(height: 20),
 
-                  // ── OCR text ──────────────────────────────────────────────
-                  Text('Extracted Text', style: theme.textTheme.titleSmall),
-                  const Divider(height: 12),
-                  if (note.ocrText != null)
+                  if (note.isTextNote) ...[
+                    Text('Note', style: theme.textTheme.titleSmall),
+                    const Divider(height: 12),
                     SelectableText(
-                      note.ocrText!,
+                      note.textContent ?? '',
                       style: theme.textTheme.bodyMedium,
-                    )
-                  else
-                    Text(
-                      'No text was extracted from this image.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontStyle: FontStyle.italic,
-                        color: cs.onSurfaceVariant,
-                      ),
                     ),
+                  ] else ...[
+                    // ── OCR text ─────────────────────────────────────────
+                    Text('Extracted Text', style: theme.textTheme.titleSmall),
+                    const Divider(height: 12),
+                    if (note.ocrText != null)
+                      SelectableText(
+                        note.ocrText!,
+                        style: theme.textTheme.bodyMedium,
+                      )
+                    else
+                      Text(
+                        'No text was extracted from this image.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontStyle: FontStyle.italic,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
                 ],
               ),
             ),
@@ -102,8 +113,10 @@ class NoteDetailPage extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Note'),
-        content: const Text(
-          'This note and its image file will be permanently deleted.',
+        content: Text(
+          note.hasImage
+              ? 'This note and its image file will be permanently deleted.'
+              : 'This note will be permanently deleted.',
         ),
         actions: [
           TextButton(

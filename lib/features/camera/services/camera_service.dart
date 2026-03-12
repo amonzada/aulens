@@ -41,6 +41,7 @@ class CameraService {
 
   final _picker = ImagePicker();
   final _eventController = StreamController<CameraTaskEvent>.broadcast();
+  String? _imagesDirPath;
 
   /// Emits lifecycle updates for background OCR tasks.
   Stream<CameraTaskEvent> get taskEvents => _eventController.stream;
@@ -58,6 +59,11 @@ class CameraService {
     );
     if (file == null) return null;
     return _persist(file);
+  }
+
+  /// Preloads camera dependencies and storage paths to reduce first-use latency.
+  Future<void> preload() async {
+    await _ensureImagesDir();
   }
 
   /// Starts OCR + persistence in the background and returns immediately.
@@ -150,16 +156,24 @@ class CameraService {
   }
 
   Future<String> _persist(XFile file) async {
+    final dirPath = await _ensureImagesDir();
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final dest = p.join(dirPath, 'wb_$ts.jpg');
+    await File(file.path).copy(dest);
+    return dest;
+  }
+
+  Future<String> _ensureImagesDir() async {
+    final cached = _imagesDirPath;
+    if (cached != null) return cached;
+
     final docs = await getApplicationDocumentsDirectory();
     final dir = Directory(p.join(docs.path, 'aulens_images'));
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
-
-    final ts = DateTime.now().millisecondsSinceEpoch;
-    final dest = p.join(dir.path, 'wb_$ts.jpg');
-    await File(file.path).copy(dest);
-    return dest;
+    _imagesDirPath = dir.path;
+    return dir.path;
   }
 
   Future<void> deleteCapturedPhotoIfOwned(String imagePath) async {

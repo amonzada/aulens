@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../../shared/providers/notes_provider.dart';
 import '../../../shared/providers/schedule_provider.dart';
+import '../../../shared/providers/settings_provider.dart';
 import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/permission_alerts.dart';
 import '../../schedule/models/subject.dart';
@@ -18,7 +19,14 @@ enum _CaptureState { idle, processing, preview }
 /// Camera tab – guides the student through capturing a whiteboard photo,
 /// auto-detecting the current class, running OCR and saving the note.
 class CameraPage extends StatefulWidget {
-  const CameraPage({super.key});
+  final bool autoCapture;
+  final Subject? fixedSubject;
+
+  const CameraPage({
+    super.key,
+    this.autoCapture = false,
+    this.fixedSubject,
+  });
 
   @override
   State<CameraPage> createState() => _CameraPageState();
@@ -30,12 +38,31 @@ class _CameraPageState extends State<CameraPage> {
   Subject? _detectedSubject; // auto-detected, shown as a hint
   Subject? _selectedSubject; // what will actually be saved
   bool _saving = false;
+  bool _autoCaptureDone = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.fixedSubject != null) {
+      _detectedSubject = widget.fixedSubject;
+      _selectedSubject = widget.fixedSubject;
+    }
+
+    if (widget.autoCapture) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _autoCaptureDone) return;
+        _autoCaptureDone = true;
+        _capture();
+      });
+    }
+  }
 
   // ── Capture flow ───────────────────────────────────────────────────────────
 
   Future<void> _capture() async {
     // Capture the provider reference before any async gap.
     final scheduleProvider = context.read<ScheduleProvider>();
+    final settings = context.read<SettingsProvider>();
 
     final permissionResult =
         await PermissionService.instance.ensureCameraFlowPermissions();
@@ -72,15 +99,24 @@ class _CameraPageState extends State<CameraPage> {
     }
 
     // 2. Auto-detect current class from schedule.
-    final entry = scheduleProvider.getCurrentClass();
-    final subject =
-        entry != null ? scheduleProvider.subjectById(entry.subjectId) : null;
+    final now = DateTime.now();
+    final entry = scheduleProvider.getCurrentClass(
+      preGraceMinutes: settings.preGraceMinutes,
+      postGraceMinutes: settings.postGraceMinutes,
+    );
+    final detected = entry != null
+        ? scheduleProvider.resolveSubjectForEntryOnDate(
+            entry,
+            now,
+          )
+        : null;
+    final subject = widget.fixedSubject ?? detected;
 
     if (!mounted) return;
     setState(() {
       _imagePath = path;
-      _detectedSubject = subject;
-      _selectedSubject = subject; // pre-select the detected subject
+      _detectedSubject = detected;
+      _selectedSubject = subject; // pre-select the detected or fixed subject
       _state = _CaptureState.preview;
     });
   }
@@ -94,28 +130,61 @@ class _CameraPageState extends State<CameraPage> {
       return;
     }
 
+    final subjectId = _selectedSubject!.id;
+    if (subjectId == null) {
+      AppSnackBar.showError(context, 'Subject is not ready yet.');
+      return;
+    }
+
     if (_imagePath == null) {
       AppSnackBar.showInfo(context, 'No captured image to save.');
       return;
     }
 
-    final subjectId = _selectedSubject!.id!;
     final imagePath = _imagePath!;
     final notesProvider = context.read<NotesProvider>();
+    final scheduleProvider = context.read<ScheduleProvider>();
+    final settings = context.read<SettingsProvider>();
+    final now = DateTime.now();
+    final entry = scheduleProvider.getCurrentClass(
+      preGraceMinutes: settings.preGraceMinutes,
+      postGraceMinutes: settings.postGraceMinutes,
+    );
+    final detected = entry != null
+        ? scheduleProvider.resolveSubjectForEntryOnDate(
+            entry,
+            now,
+          )
+        : null;
 
     setState(() => _saving = true);
     try {
+      final savedNote = await notesProvider.addPhotoNote(
+        subjectId: subjectId,
+        imagePath: imagePath,
+        ocrText: null,
+      );
+
+      if (entry != null && detected != null && detected.id != subjectId) {
+        final entryId = entry.id;
+        if (entryId != null) {
+          await scheduleProvider.setSessionOverride(
+            scheduleEntryId: entryId,
+            date: now,
+            subjectId: subjectId,
+          );
+        }
+      }
+
       CameraService.instance.enqueueBackgroundOcr(
         subjectId: subjectId,
         imagePath: imagePath,
         createdAt: DateTime.now(),
         runOcr: OcrService.instance.extractText,
         saveNote: (ocrText) async {
-          await notesProvider.addNote(
-            subjectId: subjectId,
-            imagePath: imagePath,
-            ocrText: ocrText,
-          );
+          if (savedNote.id != null) {
+            await notesProvider.updateOcrText(savedNote.id!, ocrText);
+          }
         },
       );
     } catch (_) {

@@ -6,6 +6,11 @@ import '../../features/notes/models/note.dart';
 import '../../features/notes/models/processing_note.dart';
 import '../../features/notes/services/notes_service.dart';
 import '../../features/search/services/search_service.dart';
+import '../../features/schedule/models/schedule_entry.dart';
+import '../../features/schedule/models/subject.dart';
+import '../../features/timeline/models/class_session.dart';
+import '../../core/constants/app_constants.dart';
+import '../../core/utils/time_utils.dart';
 
 /// Manages the in-memory list of notes and keeps it in sync with SQLite.
 class NotesProvider extends ChangeNotifier {
@@ -39,13 +44,14 @@ class NotesProvider extends ChangeNotifier {
 
   // ── CRUD ───────────────────────────────────────────────────────────────────
 
-  Future<Note> addNote({
+  Future<Note> addPhotoNote({
     required int subjectId,
     required String imagePath,
     String? ocrText,
   }) async {
     final note = Note(
       subjectId: subjectId,
+      noteType: NoteType.photo,
       imagePath: imagePath,
       ocrText: ocrText,
       createdAt: DateTime.now(),
@@ -53,6 +59,24 @@ class NotesProvider extends ChangeNotifier {
     final id = await _notesService.createNote(note);
     final saved = note.copyWith(id: id);
     _notes = [saved, ..._notes]; // newest first
+    _safeNotify();
+    return saved;
+  }
+
+  Future<Note> addTextNote({
+    required int subjectId,
+    required String textContent,
+  }) async {
+    final trimmed = textContent.trim();
+    final note = Note(
+      subjectId: subjectId,
+      noteType: NoteType.text,
+      textContent: trimmed,
+      createdAt: DateTime.now(),
+    );
+    final id = await _notesService.createNote(note);
+    final saved = note.copyWith(id: id);
+    _notes = [saved, ..._notes];
     _safeNotify();
     return saved;
   }
@@ -65,6 +89,24 @@ class NotesProvider extends ChangeNotifier {
     }
     await _notesService.deleteNote(id);
     _notes = _notes.where((n) => n.id != id).toList();
+    _safeNotify();
+  }
+
+  Future<void> clearOcrText(int id) async {
+    await _notesService.updateNoteOcrText(id, null);
+    _notes = [
+      for (final note in _notes)
+        if (note.id == id) note.copyWith(ocrText: null) else note,
+    ];
+    _safeNotify();
+  }
+
+  Future<void> updateOcrText(int id, String? ocrText) async {
+    await _notesService.updateNoteOcrText(id, ocrText);
+    _notes = [
+      for (final note in _notes)
+        if (note.id == id) note.copyWith(ocrText: ocrText) else note,
+    ];
     _safeNotify();
   }
 
@@ -93,6 +135,122 @@ class NotesProvider extends ChangeNotifier {
   /// Returns an empty list when [query] is blank.
   List<Note> searchNotes(String query) =>
       _searchService.searchByOcrText(_notes, query);
+
+  /// Builds class sessions for a subject using schedule entries and notes.
+  List<ClassSession> sessionsForSubject({
+    required Subject subject,
+    required List<ScheduleEntry> scheduleEntries,
+    int preGraceMinutes = AppConstants.sessionPreGraceMinutes,
+    int postGraceMinutes = AppConstants.sessionPostGraceMinutes,
+  }) {
+    final subjectNotes = notesForSubject(subject.id!);
+    final subjectProcessing = processingNotesForSubject(subject.id!);
+    final sessions = <String, _SessionBucket>{};
+
+    void addToSession({
+      required DateTime date,
+      required ScheduleEntry? entry,
+      required bool isUnscheduled,
+      Note? note,
+      ProcessingNote? processing,
+    }) {
+      final dateKey = _dateKey(date);
+      final entryKey = entry?.id?.toString() ??
+          '${entry?.weekday ?? 0}-${entry?.startTime ?? 'na'}-${entry?.endTime ?? 'na'}';
+      final key = isUnscheduled ? 'unscheduled-$dateKey' : '$entryKey-$dateKey';
+
+      final bucket = sessions.putIfAbsent(
+        key,
+        () => _SessionBucket(
+          subject: subject,
+          date: date,
+          scheduleEntry: entry,
+          isUnscheduled: isUnscheduled,
+        ),
+      );
+
+      if (note != null) bucket.notes.add(note);
+      if (processing != null) bucket.processingNotes.add(processing);
+    }
+
+    for (final note in subjectNotes) {
+      final entry = TimeUtils.matchEntryForTimestamp(
+        scheduleEntries,
+        note.createdAt,
+        preGraceMinutes: preGraceMinutes,
+        postGraceMinutes: postGraceMinutes,
+      );
+      addToSession(
+        date: _dateOnly(note.createdAt),
+        entry: entry,
+        isUnscheduled: entry == null,
+        note: note,
+      );
+    }
+
+    for (final processing in subjectProcessing) {
+      final entry = TimeUtils.matchEntryForTimestamp(
+        scheduleEntries,
+        processing.createdAt,
+        preGraceMinutes: preGraceMinutes,
+        postGraceMinutes: postGraceMinutes,
+      );
+      addToSession(
+        date: _dateOnly(processing.createdAt),
+        entry: entry,
+        isUnscheduled: entry == null,
+        processing: processing,
+      );
+    }
+
+    // Add empty sessions for the current week schedule slots.
+    for (final entry in scheduleEntries) {
+      final date = TimeUtils.dateForWeekdayInCurrentWeek(entry.weekday);
+      addToSession(
+        date: date,
+        entry: entry,
+        isUnscheduled: false,
+      );
+    }
+
+    final list = sessions.values.map((bucket) {
+      final notes = [...bucket.notes]
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      final processing = [...bucket.processingNotes]
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      return ClassSession(
+        subject: bucket.subject,
+        date: bucket.date,
+        scheduleEntry: bucket.scheduleEntry,
+        notes: notes,
+        processingNotes: processing,
+        isUnscheduled: bucket.isUnscheduled,
+      );
+    }).toList();
+
+    list.sort((a, b) {
+      final dateCompare = b.date.compareTo(a.date);
+      if (dateCompare != 0) return dateCompare;
+
+      if (a.isUnscheduled != b.isUnscheduled) {
+        return a.isUnscheduled ? 1 : -1;
+      }
+
+      final aStart = a.startTime == null
+          ? 9999
+          : TimeUtils.minutesFromTimeString(a.startTime!);
+      final bStart = b.startTime == null
+          ? 9999
+          : TimeUtils.minutesFromTimeString(b.startTime!);
+      return aStart.compareTo(bStart);
+    });
+
+    return list;
+  }
+
+  DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
+
+  String _dateKey(DateTime dt) => '${dt.year}-${dt.month}-${dt.day}';
 
   void _onTaskEvent(CameraTaskEvent event) {
     switch (event.status) {
@@ -132,4 +290,20 @@ class NotesProvider extends ChangeNotifier {
     _taskSub?.cancel();
     super.dispose();
   }
+}
+
+class _SessionBucket {
+  final Subject subject;
+  final DateTime date;
+  final ScheduleEntry? scheduleEntry;
+  final bool isUnscheduled;
+  final List<Note> notes = [];
+  final List<ProcessingNote> processingNotes = [];
+
+  _SessionBucket({
+    required this.subject,
+    required this.date,
+    required this.scheduleEntry,
+    required this.isUnscheduled,
+  });
 }

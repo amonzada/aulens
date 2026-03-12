@@ -20,12 +20,13 @@ class DatabaseService {
   DatabaseService._();
 
   static const String _dbName = 'aulens.db';
-  static const int _dbVersion = 2;
+  static const int _dbVersion = 5;
 
   static const String _subjectsTable = 'subjects';
   static const String _scheduleTable = 'schedule';
   static const String _legacyScheduleTable = 'schedule_entries';
   static const String _notesTable = 'notes';
+  static const String _sessionOverridesTable = 'session_overrides';
 
   Database? _db;
 
@@ -52,7 +53,9 @@ class DatabaseService {
     await db.execute('''
       CREATE TABLE $_subjectsTable (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL
+        name TEXT NOT NULL,
+        professor TEXT,
+        classroom TEXT
       )
     ''');
 
@@ -72,9 +75,22 @@ class DatabaseService {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         subject_id INTEGER NOT NULL
           REFERENCES $_subjectsTable(id) ON DELETE CASCADE,
-        image_path TEXT NOT NULL,
+        note_type TEXT NOT NULL DEFAULT 'photo',
+        image_path TEXT,
         ocr_text TEXT,
+        text_content TEXT,
         created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE $_sessionOverridesTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        schedule_entry_id INTEGER NOT NULL
+          REFERENCES $_scheduleTable(id) ON DELETE CASCADE,
+        date TEXT NOT NULL,
+        subject_id INTEGER NOT NULL
+          REFERENCES $_subjectsTable(id) ON DELETE CASCADE
       )
     ''');
   }
@@ -84,8 +100,17 @@ class DatabaseService {
       await _migrateScheduleEntriesToSchedule(db);
     }
 
-    // Safety migration for legacy DBs that may not have OCR storage yet.
-    await _ensureNotesOcrColumn(db);
+    if (oldVersion < 4) {
+      await _migrateNotesToTypedTable(db);
+    } else {
+      await _ensureNotesOcrColumn(db);
+      await _ensureNotesTypeColumns(db);
+    }
+
+    await _ensureSessionOverridesTable(db);
+
+    // Backfill new subject metadata columns.
+    await _ensureSubjectMetadataColumns(db);
   }
 
   Future<void> _migrateScheduleEntriesToSchedule(Database db) async {
@@ -131,6 +156,92 @@ class DatabaseService {
     if (!hasOcr) {
       await db.execute('ALTER TABLE $_notesTable ADD COLUMN ocr_text TEXT');
     }
+  }
+
+  Future<void> _ensureNotesTypeColumns(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info($_notesTable)');
+    final hasType = columns.any((row) => row['name'] == 'note_type');
+    final hasText = columns.any((row) => row['name'] == 'text_content');
+
+    if (!hasType) {
+      await db.execute(
+        "ALTER TABLE $_notesTable ADD COLUMN note_type TEXT NOT NULL DEFAULT 'photo'",
+      );
+    }
+
+    if (!hasText) {
+      await db.execute('ALTER TABLE $_notesTable ADD COLUMN text_content TEXT');
+    }
+  }
+
+  Future<void> _migrateNotesToTypedTable(Database db) async {
+    final hasNotes = await _tableExists(db, _notesTable);
+    if (!hasNotes) {
+      await db.execute('''
+        CREATE TABLE $_notesTable (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          subject_id INTEGER NOT NULL
+            REFERENCES $_subjectsTable(id) ON DELETE CASCADE,
+          note_type TEXT NOT NULL DEFAULT 'photo',
+          image_path TEXT,
+          ocr_text TEXT,
+          text_content TEXT,
+          created_at TEXT NOT NULL
+        )
+      ''');
+      return;
+    }
+
+    await db.execute('''
+      CREATE TABLE notes_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        subject_id INTEGER NOT NULL
+          REFERENCES $_subjectsTable(id) ON DELETE CASCADE,
+        note_type TEXT NOT NULL DEFAULT 'photo',
+        image_path TEXT,
+        ocr_text TEXT,
+        text_content TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      INSERT INTO notes_new (id, subject_id, note_type, image_path, ocr_text, text_content, created_at)
+      SELECT id, subject_id, 'photo', image_path, ocr_text, NULL, created_at
+      FROM $_notesTable
+    ''');
+
+    await db.execute('DROP TABLE $_notesTable');
+    await db.execute('ALTER TABLE notes_new RENAME TO $_notesTable');
+  }
+
+  Future<void> _ensureSubjectMetadataColumns(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info($_subjectsTable)');
+    final hasProfessor = columns.any((row) => row['name'] == 'professor');
+    final hasClassroom = columns.any((row) => row['name'] == 'classroom');
+
+    if (!hasProfessor) {
+      await db.execute('ALTER TABLE $_subjectsTable ADD COLUMN professor TEXT');
+    }
+
+    if (!hasClassroom) {
+      await db.execute('ALTER TABLE $_subjectsTable ADD COLUMN classroom TEXT');
+    }
+  }
+
+  Future<void> _ensureSessionOverridesTable(Database db) async {
+    final exists = await _tableExists(db, _sessionOverridesTable);
+    if (exists) return;
+    await db.execute('''
+      CREATE TABLE $_sessionOverridesTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        schedule_entry_id INTEGER NOT NULL
+          REFERENCES $_scheduleTable(id) ON DELETE CASCADE,
+        date TEXT NOT NULL,
+        subject_id INTEGER NOT NULL
+          REFERENCES $_subjectsTable(id) ON DELETE CASCADE
+      )
+    ''');
   }
 
   Future<void> close() async {
@@ -290,8 +401,57 @@ class DatabaseService {
     );
   }
 
+  Future<int> updateNoteOcrText(int id, String? ocrText) async {
+    final db = await database;
+    return db.update(
+      _notesTable,
+      {'ocr_text': ocrText},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Future<int> deleteNote(int id) async {
     final db = await database;
     return db.delete(_notesTable, where: 'id = ?', whereArgs: [id]);
+  }
+
+  // ── Session overrides CRUD ───────────────────────────────────────────────
+
+  Future<int> upsertSessionOverride({
+    required int scheduleEntryId,
+    required String date,
+    required int subjectId,
+  }) async {
+    final db = await database;
+    final existing = await db.query(
+      _sessionOverridesTable,
+      columns: ['id'],
+      where: 'schedule_entry_id = ? AND date = ?',
+      whereArgs: [scheduleEntryId, date],
+      limit: 1,
+    );
+
+    if (existing.isEmpty) {
+      return db.insert(_sessionOverridesTable, {
+        'schedule_entry_id': scheduleEntryId,
+        'date': date,
+        'subject_id': subjectId,
+      });
+    }
+
+    final id = existing.first['id'] as int;
+    await db.update(
+      _sessionOverridesTable,
+      {'subject_id': subjectId},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    return id;
+  }
+
+  Future<List<Map<String, Object?>>> getSessionOverrides() async {
+    final db = await database;
+    return db.query(_sessionOverridesTable);
   }
 }

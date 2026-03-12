@@ -5,106 +5,44 @@ import 'package:intl/intl.dart';
 
 import '../../notes/models/note.dart';
 import '../../notes/models/processing_note.dart';
-import '../models/timeline_group.dart';
+import '../models/class_session.dart';
+import '../models/photo_group.dart';
 import '../models/timeline_item.dart';
 
-/// Vertical chronological timeline grouped by class session date.
-///
-/// Expected input: notes from a single subject.
+/// Vertical timeline grouped by class session.
 class ClassTimelineView extends StatelessWidget {
-  final List<Note> notes;
-  final List<ProcessingNote> processingNotes;
+  final List<ClassSession> sessions;
   final ValueChanged<Note>? onNoteTap;
 
   const ClassTimelineView({
     super.key,
-    required this.notes,
-    this.processingNotes = const [],
+    required this.sessions,
     this.onNoteTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final groups = _buildGroups(notes, processingNotes);
-    if (groups.isEmpty) {
+    if (sessions.isEmpty) {
       return const _EmptyClassNotes();
     }
 
     return Column(
-      children: groups
-          .map(
-            (g) => _TimelineGroupSection(
-              group: g,
-              onNoteTap: onNoteTap,
-            ),
-          )
+      children: sessions
+          .map((session) => _TimelineGroupSection(
+                session: session,
+                onNoteTap: onNoteTap,
+              ))
           .toList(),
     );
-  }
-
-  List<TimelineGroup> _buildGroups(
-    List<Note> source,
-    List<ProcessingNote> pending,
-  ) {
-    final byDay = <String, _FeedBucket>{};
-
-    for (final note in source) {
-      final key = DateFormat('yyyy-MM-dd').format(note.createdAt);
-      byDay.putIfAbsent(key, () => _FeedBucket()).ready.add(note);
-    }
-
-    for (final note in pending) {
-      final key = DateFormat('yyyy-MM-dd').format(note.createdAt);
-      byDay.putIfAbsent(key, () => _FeedBucket()).processing.add(note);
-    }
-
-    final keys = byDay.keys.toList()..sort((a, b) => b.compareTo(a));
-    return keys.map((key) {
-      final date = DateTime.parse(key);
-      final bucket = byDay[key]!;
-
-      final items = bucket.ready
-          .map(
-            (note) => TimelineItem(
-              noteId: note.id,
-              createdAt: note.createdAt,
-              timeLabel: DateFormat('HH:mm').format(note.createdAt),
-              imagePath: note.imagePath,
-              ocrSnippet: _snippet(note.ocrText),
-              source: note,
-            ),
-          )
-          .toList();
-
-      items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-      final processingItems = bucket.processing
-        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-      return TimelineGroup(
-        date: date,
-        dateLabel: DateFormat('EEE, MMM d, yyyy').format(date),
-        items: items,
-        processingItems: processingItems,
-      );
-    }).toList();
-  }
-
-  String? _snippet(String? text) {
-    if (text == null) return null;
-    final compact = text.replaceAll(RegExp(r'\s+'), ' ').trim();
-    if (compact.isEmpty) return null;
-    if (compact.length <= 120) return compact;
-    return '${compact.substring(0, 120)}...';
   }
 }
 
 class _TimelineGroupSection extends StatelessWidget {
-  final TimelineGroup group;
+  final ClassSession session;
   final ValueChanged<Note>? onNoteTap;
 
   const _TimelineGroupSection({
-    required this.group,
+    required this.session,
     required this.onNoteTap,
   });
 
@@ -112,6 +50,13 @@ class _TimelineGroupSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final dateLabel = DateFormat('EEE, MMM d, yyyy').format(session.date);
+    final totalItems =
+        session.notes.length + session.processingNotes.length;
+    final timeLabel = session.isUnscheduled
+        ? 'Unscheduled'
+        : '${session.startTime} – ${session.endTime}';
+    final entries = _buildEntries(session);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
@@ -123,14 +68,21 @@ class _TimelineGroupSection extends StatelessWidget {
               Icon(Icons.event_note, size: 14, color: cs.primary),
               const SizedBox(width: 6),
               Text(
-                group.dateLabel,
+                dateLabel,
                 style: theme.textTheme.labelLarge?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(width: 8),
               Text(
-                '${group.items.length + group.processingItems.length} item${group.items.length + group.processingItems.length == 1 ? '' : 's'}',
+                timeLabel,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '$totalItems item${totalItems == 1 ? '' : 's'}',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: cs.onSurfaceVariant,
                 ),
@@ -138,19 +90,121 @@ class _TimelineGroupSection extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          ...group.processingItems.map((p) => _ProcessingNodeTile(note: p)),
-          ...List.generate(
-            group.items.length,
-            (index) => _TimelineNodeTile(
-              item: group.items[index],
-              isLast: index == group.items.length - 1,
-              onTap: onNoteTap,
+          ...session.processingNotes
+              .map((p) => _ProcessingNodeTile(note: p)),
+          if (entries.isEmpty && session.processingNotes.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 60, top: 4),
+              child: Text(
+                'No notes in this session.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: cs.onSurfaceVariant),
+              ),
+            )
+          else
+            ...List.generate(
+              entries.length,
+              (index) {
+                final entry = entries[index];
+                final isLast = index == entries.length - 1;
+                if (entry.photoGroup != null) {
+                  return _PhotoGroupTile(
+                    group: entry.photoGroup!,
+                    isLast: isLast,
+                    onNoteTap: onNoteTap,
+                  );
+                }
+
+                return _TimelineNodeTile(
+                  item: entry.item!,
+                  isLast: isLast,
+                  onTap: onNoteTap,
+                );
+              },
             ),
-          ),
         ],
       ),
     );
   }
+}
+
+class _SessionEntry {
+  final TimelineItem? item;
+  final PhotoGroup? photoGroup;
+
+  const _SessionEntry({this.item, this.photoGroup});
+}
+
+List<_SessionEntry> _buildEntries(ClassSession session) {
+  const groupWindow = Duration(minutes: 2);
+  final notes = [...session.notes]
+    ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+  final entries = <_SessionEntry>[];
+
+  int i = 0;
+  while (i < notes.length) {
+    final current = notes[i];
+
+    if (current.isTextNote) {
+      entries.add(_SessionEntry(item: _toTimelineItem(current)));
+      i += 1;
+      continue;
+    }
+
+    final group = <Note>[current];
+    var last = current;
+    var j = i + 1;
+    while (j < notes.length) {
+      final candidate = notes[j];
+      if (candidate.isTextNote) break;
+      if (candidate.createdAt.difference(last.createdAt) <= groupWindow) {
+        group.add(candidate);
+        last = candidate;
+        j += 1;
+      } else {
+        break;
+      }
+    }
+
+    if (group.length > 1) {
+      entries.add(
+        _SessionEntry(
+          photoGroup: PhotoGroup(
+            subject: session.subject,
+            timestamp: group.first.createdAt,
+            photos: group,
+          ),
+        ),
+      );
+      i = j;
+      continue;
+    }
+
+    entries.add(_SessionEntry(item: _toTimelineItem(current)));
+    i += 1;
+  }
+
+  return entries;
+}
+
+TimelineItem _toTimelineItem(Note note) {
+  return TimelineItem(
+    noteId: note.id,
+    createdAt: note.createdAt,
+    timeLabel: DateFormat('HH:mm').format(note.createdAt),
+    imagePath: note.imagePath,
+    snippet: _snippetText(note.textContent ?? note.ocrText),
+    isTextNote: note.isTextNote,
+    source: note,
+  );
+}
+
+String? _snippetText(String? text) {
+  if (text == null) return null;
+  final compact = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (compact.isEmpty) return null;
+  if (compact.length <= 120) return compact;
+  return '${compact.substring(0, 120)}...';
 }
 
 class _TimelineNodeTile extends StatelessWidget {
@@ -219,29 +273,47 @@ class _TimelineNodeTile extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.file(
-                        File(item.imagePath),
-                        width: 72,
-                        height: 72,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
+                    if (item.imagePath != null &&
+                        item.imagePath!.trim().isNotEmpty) ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.file(
+                          File(item.imagePath!),
                           width: 72,
                           height: 72,
-                          color: cs.surfaceContainerHighest,
-                          alignment: Alignment.center,
-                          child: Icon(
-                            Icons.broken_image_outlined,
-                            color: cs.outlineVariant,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            width: 72,
+                            height: 72,
+                            color: cs.surfaceContainerHighest,
+                            alignment: Alignment.center,
+                            child: Icon(
+                              Icons.broken_image_outlined,
+                              color: cs.outlineVariant,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
+                      const SizedBox(width: 10),
+                    ] else ...[
+                      Container(
+                        width: 72,
+                        height: 72,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: cs.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          Icons.note_alt_outlined,
+                          color: cs.outlineVariant,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                    ],
                     Expanded(
                       child: Text(
-                        item.ocrSnippet ?? 'No text extracted.',
+                        item.snippet ?? 'No text available.',
                         maxLines: 4,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall,
@@ -258,6 +330,202 @@ class _TimelineNodeTile extends StatelessWidget {
   }
 }
 
+class _PhotoGroupTile extends StatelessWidget {
+  final PhotoGroup group;
+  final bool isLast;
+  final ValueChanged<Note>? onNoteTap;
+
+  const _PhotoGroupTile({
+    required this.group,
+    required this.isLast,
+    required this.onNoteTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final count = group.photos.length;
+    final label = DateFormat('HH:mm').format(group.timestamp);
+    final cover = group.photos.first.imagePath;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => _showGroupSheet(context),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 60,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 20,
+              child: Column(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: cs.primary,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  if (!isLast)
+                    Container(
+                      width: 2,
+                      height: 90,
+                      color: cs.outlineVariant,
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: cs.outlineVariant),
+                ),
+                child: Row(
+                  children: [
+                    if (cover != null && cover.trim().isNotEmpty)
+                      Stack(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.file(
+                              File(cover),
+                              width: 72,
+                              height: 72,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                width: 72,
+                                height: 72,
+                                color: cs.surfaceContainerHighest,
+                                alignment: Alignment.center,
+                                child: Icon(
+                                  Icons.broken_image_outlined,
+                                  color: cs.outlineVariant,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            right: 4,
+                            bottom: 4,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: cs.primary,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '$count',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelSmall
+                                    ?.copyWith(
+                                      color: cs.onPrimary,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      Container(
+                        width: 72,
+                        height: 72,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: cs.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          Icons.photo_library_outlined,
+                          color: cs.outlineVariant,
+                        ),
+                      ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Explanation group\n$count photos',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showGroupSheet(BuildContext context) async {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => SafeArea(
+        child: ListView.separated(
+          padding: const EdgeInsets.all(16),
+          itemCount: group.photos.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final note = group.photos[index];
+            final label = DateFormat('HH:mm').format(note.createdAt);
+            final imagePath = note.imagePath;
+            return ListTile(
+              leading: imagePath != null && imagePath.trim().isNotEmpty
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.file(
+                        File(imagePath),
+                        width: 48,
+                        height: 48,
+                        fit: BoxFit.cover,
+                      ),
+                    )
+                  : Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: cs.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        Icons.photo_outlined,
+                        color: cs.outlineVariant,
+                      ),
+                    ),
+              title: Text('Photo $label'),
+              onTap: () {
+                Navigator.pop(context);
+                if (onNoteTap != null) onNoteTap!(note);
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
 class _ProcessingNodeTile extends StatelessWidget {
   final ProcessingNote note;
 
@@ -266,8 +534,7 @@ class _ProcessingNodeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final l10n = AppLocalizations.of(context)!;
-    final timeLabel = DateFormat.Hm(l10n.localeName).format(note.createdAt);
+    final timeLabel = DateFormat('HH:mm').format(note.createdAt);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -368,11 +635,6 @@ class _ProcessingNodeTile extends StatelessWidget {
   }
 }
 
-class _FeedBucket {
-  final List<Note> ready = <Note>[];
-  final List<ProcessingNote> processing = <ProcessingNote>[];
-}
-
 class _EmptyClassNotes extends StatelessWidget {
   const _EmptyClassNotes();
 
@@ -394,7 +656,7 @@ class _EmptyClassNotes extends StatelessWidget {
             Icon(Icons.menu_book_outlined, color: cs.outline, size: 22),
             const SizedBox(height: 10),
             Text(
-              'No notes for this class yet. Tap the camera to start.',
+              'No sessions yet. Tap the camera or add a text note to start.',
               textAlign: TextAlign.center,
               style: Theme.of(context)
                   .textTheme

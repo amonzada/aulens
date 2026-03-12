@@ -5,8 +5,9 @@ class TimelineItem {
   final int? noteId;
   final DateTime createdAt;
   final String timeLabel;
-  final String imagePath;
-  final String? ocrSnippet;
+  final String? imagePath;
+  final String? snippet;
+  final bool isTextNote;
   final Note source;
 
   const TimelineItem({
@@ -14,7 +15,8 @@ class TimelineItem {
     required this.createdAt,
     required this.timeLabel,
     required this.imagePath,
-    required this.ocrSnippet,
+    required this.snippet,
+    required this.isTextNote,
     required this.source,
   });
 }

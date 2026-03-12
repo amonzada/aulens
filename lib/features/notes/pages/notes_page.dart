@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../timeline/widgets/class_timeline_view.dart';
-import '../models/processing_note.dart';
+import '../../timeline/models/class_session.dart';
+import '../../schedule/models/subject.dart';
 import '../../../shared/providers/notes_provider.dart';
 import '../../../shared/providers/schedule_provider.dart';
-import '../models/note.dart';
+import '../../../shared/providers/settings_provider.dart';
+import 'add_text_note_page.dart';
 import 'note_detail_page.dart';
 
 /// Notes tab – shows all subjects with sleek timeline feed sections.
@@ -31,10 +33,17 @@ class NotesPage extends StatelessWidget {
             itemCount: schedule.subjects.length,
             itemBuilder: (context, i) {
               final subject = schedule.subjects[i];
+              final entries = schedule.entriesForSubject(subject.id!);
+              final settings = context.watch<SettingsProvider>();
+              final sessions = notes.sessionsForSubject(
+                subject: subject,
+                scheduleEntries: entries,
+                preGraceMinutes: settings.preGraceMinutes,
+                postGraceMinutes: settings.postGraceMinutes,
+              );
               return _SubjectExpansion(
-                subjectName: subject.name,
-                notes: notes.notesForSubject(subject.id!),
-                processingNotes: notes.processingNotesForSubject(subject.id!),
+                subject: subject,
+                sessions: sessions,
               );
             },
           );
@@ -83,14 +92,12 @@ class _EmptyState extends StatelessWidget {
 // ── Subject expansion tile ────────────────────────────────────────────────────
 
 class _SubjectExpansion extends StatelessWidget {
-  final String subjectName;
-  final List<Note> notes;
-  final List<ProcessingNote> processingNotes;
+  final Subject subject;
+  final List<ClassSession> sessions;
 
   const _SubjectExpansion({
-    required this.subjectName,
-    required this.notes,
-    required this.processingNotes,
+    required this.subject,
+    required this.sessions,
   });
 
   @override
@@ -103,7 +110,7 @@ class _SubjectExpansion extends StatelessWidget {
         leading: CircleAvatar(
           backgroundColor: cs.primaryContainer,
           child: Text(
-            subjectName[0].toUpperCase(),
+            subject.name[0].toUpperCase(),
             style: TextStyle(
               color: cs.onPrimaryContainer,
               fontWeight: FontWeight.bold,
@@ -111,17 +118,30 @@ class _SubjectExpansion extends StatelessWidget {
           ),
         ),
         title: Text(
-          subjectName,
+          subject.name,
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
-        subtitle: Text(
-          '${notes.length + processingNotes.length} item${notes.length + processingNotes.length == 1 ? '' : 's'}',
-        ),
+        subtitle: _SessionCountSubtitle(sessions: sessions),
         childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AddTextNotePage(subject: subject),
+                  ),
+                ),
+                icon: const Icon(Icons.note_add_outlined, size: 18),
+                label: const Text('Add Text Note'),
+              ),
+            ),
+          ),
           ClassTimelineView(
-            notes: notes,
-            processingNotes: processingNotes,
+            sessions: sessions,
             onNoteTap: (note) => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => NoteDetailPage(note: note)),
@@ -130,5 +150,19 @@ class _SubjectExpansion extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _SessionCountSubtitle extends StatelessWidget {
+  final List<ClassSession> sessions;
+  const _SessionCountSubtitle({required this.sessions});
+
+  @override
+  Widget build(BuildContext context) {
+    final total = sessions.fold<int>(
+      0,
+      (sum, s) => sum + s.notes.length + s.processingNotes.length,
+    );
+    return Text('$total item${total == 1 ? '' : 's'}');
   }
 }

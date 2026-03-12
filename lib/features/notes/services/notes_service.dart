@@ -16,9 +16,16 @@ class NotesService {
 
   Future<int> createNote(Note note) => _db.insertNote(note);
 
+  Future<int> updateNoteOcrText(int id, String? ocrText) =>
+      _db.updateNoteOcrText(id, ocrText);
+
   Future<int> deleteNote(int id) => _db.deleteNote(id);
 
-  Future<void> deleteImageFile(String imagePath) async {
+  Future<void> deleteImageFile(String? imagePath) async {
+    if (imagePath == null || imagePath.trim().isEmpty) {
+      return;
+    }
+
     if (!await _isManagedImagePath(imagePath)) {
       return;
     }

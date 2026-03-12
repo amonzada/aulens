@@ -41,7 +41,7 @@ class _SearchPageState extends State<SearchPage> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: SearchBar(
               controller: _ctrl,
-              hintText: 'Search in extracted text…',
+              hintText: 'Search in your notes…',
               leading: const Icon(Icons.search),
               trailing: _query.isNotEmpty
                   ? [
@@ -148,6 +148,7 @@ class _ResultCard extends StatelessWidget {
     final subject =
         context.watch<ScheduleProvider>().subjectById(note.subjectId);
     final dateStr = DateFormat('MMM d, yyyy').format(note.createdAt);
+    final textSource = note.textContent ?? note.ocrText;
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
@@ -163,22 +164,40 @@ class _ResultCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Thumbnail
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.file(
-                  File(note.imagePath),
-                  width: 64,
-                  height: 64,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
+              if (note.hasImage) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.file(
+                    File(note.imagePath!),
                     width: 64,
                     height: 64,
-                    color: cs.surfaceContainerHighest,
-                    child: Icon(Icons.broken_image_outlined,
-                        color: cs.outlineVariant),
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      width: 64,
+                      height: 64,
+                      color: cs.surfaceContainerHighest,
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        color: cs.outlineVariant,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ] else ...[
+                Container(
+                  width: 64,
+                  height: 64,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    Icons.note_alt_outlined,
+                    color: cs.outlineVariant,
+                  ),
+                ),
+              ],
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -208,8 +227,14 @@ class _ResultCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    if (note.ocrText != null)
-                      _HighlightedText(text: note.ocrText!, query: query),
+                    if (textSource != null && textSource.isNotEmpty)
+                      _HighlightedText(text: textSource, query: query)
+                    else
+                      Text(
+                        'No text available.',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: cs.onSurfaceVariant),
+                      ),
                   ],
                 ),
               ),

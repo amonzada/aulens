@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   cupertino_icons: ^1.0.8
 
   # Local database
@@ -35,6 +37,9 @@ dependencies:
 
   # Runtime permission handling
   permission_handler: ^11.3.1
+
+  # Simple key/value settings
+  shared_preferences: ^2.3.2
 
 dev_dependencies:
   flutter_test:

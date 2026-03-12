@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../shared/providers/schedule_provider.dart';
+import '../models/subject.dart';
 
 /// Simple form for creating a new [Subject].
 class AddSubjectPage extends StatefulWidget {
-  const AddSubjectPage({super.key});
+  final Subject? subject;
+  const AddSubjectPage({super.key, this.subject});
 
   @override
   State<AddSubjectPage> createState() => _AddSubjectPageState();
@@ -13,26 +15,56 @@ class AddSubjectPage extends StatefulWidget {
 
 class _AddSubjectPageState extends State<AddSubjectPage> {
   final _formKey = GlobalKey<FormState>();
-  final _nameCtrl = TextEditingController();
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _professorCtrl;
+  late final TextEditingController _classroomCtrl;
   bool _saving = false;
+
+  bool get _isEdit => widget.subject != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.subject?.name ?? '');
+    _professorCtrl =
+        TextEditingController(text: widget.subject?.professor ?? '');
+    _classroomCtrl =
+        TextEditingController(text: widget.subject?.classroom ?? '');
+  }
 
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _professorCtrl.dispose();
+    _classroomCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
-    await context.read<ScheduleProvider>().addSubject(_nameCtrl.text);
+    final provider = context.read<ScheduleProvider>();
+    if (_isEdit) {
+      await provider.updateSubject(
+        id: widget.subject!.id!,
+        name: _nameCtrl.text,
+        professor: _professorCtrl.text,
+        classroom: _classroomCtrl.text,
+      );
+    } else {
+      await provider.addSubject(
+        name: _nameCtrl.text,
+        professor: _professorCtrl.text,
+        classroom: _classroomCtrl.text,
+      );
+    }
     if (mounted) Navigator.pop(context);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('New Subject')),
+      appBar: AppBar(title: Text(_isEdit ? 'Edit Subject' : 'New Subject')),
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Form(
@@ -53,6 +85,26 @@ class _AddSubjectPageState extends State<AddSubjectPage> {
                         ? 'Name cannot be empty'
                         : null,
               ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _professorCtrl,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Professor (optional)',
+                  hintText: 'e.g., Dr. Almeida',
+                  prefixIcon: Icon(Icons.person_outline),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _classroomCtrl,
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(
+                  labelText: 'Classroom (optional)',
+                  hintText: 'e.g., IC-402',
+                  prefixIcon: Icon(Icons.place_outlined),
+                ),
+              ),
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
@@ -64,7 +116,7 @@ class _AddSubjectPageState extends State<AddSubjectPage> {
                           width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('Save Subject'),
+                      : Text(_isEdit ? 'Save Changes' : 'Save Subject'),
                 ),
               ),
             ],

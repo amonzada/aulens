@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../shared/providers/class_mode_controller.dart';
 import '../../../shared/providers/notes_provider.dart';
 import '../../../shared/providers/schedule_provider.dart';
+import '../../../shared/providers/settings_provider.dart';
+import '../../../shared/widgets/app_snackbar.dart';
+import '../../settings/pages/settings_page.dart';
 import '../models/schedule_entry.dart';
 import '../models/subject.dart';
+import '../../class_mode/pages/class_mode_page.dart';
 import 'add_schedule_page.dart';
 import 'add_subject_page.dart';
 
@@ -16,7 +21,21 @@ class SchedulePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Schedule')),
+      appBar: AppBar(
+        title: const Text('Schedule'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.record_voice_over_outlined),
+            tooltip: 'Class mode',
+            onPressed: () => _openClassModeManual(context),
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: () => _openSettings(context),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _pushAddSubject(context),
         icon: const Icon(Icons.add),
@@ -39,8 +58,10 @@ class SchedulePage extends StatelessWidget {
               return _SubjectCard(
                 subject: subject,
                 entries: entries,
+                onEditSubject: () =>
+                  _pushEditSubject(context, subject),
                 onDeleteSubject: () =>
-                    _confirmDeleteSubject(context, provider, subject),
+                  _confirmDeleteSubject(context, provider, subject),
                 onAddEntry: () =>
                     _pushAddSchedule(context, subject),
                 onDeleteEntry: (e) =>
@@ -62,6 +83,52 @@ class SchedulePage extends StatelessWidget {
       Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => AddSchedulePage(subject: subject)),
+      );
+
+  void _openSettings(BuildContext context) => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const SettingsPage()),
+      );
+
+  Future<void> _openClassModeManual(BuildContext context) async {
+    final scheduleProvider = context.read<ScheduleProvider>();
+    final settings = context.read<SettingsProvider>();
+    final entry = scheduleProvider.getCurrentClass(
+      preGraceMinutes: settings.preGraceMinutes,
+      postGraceMinutes: settings.postGraceMinutes,
+    );
+    if (entry == null) {
+      AppSnackBar.showInfo(context, 'No active class right now.');
+      return;
+    }
+
+    final subject = scheduleProvider.subjectById(entry.subjectId);
+    if (subject == null) return;
+
+    final classMode = context.read<ClassModeController>();
+    classMode.clearDismissed();
+    classMode.setOpen(true);
+    final subjects = scheduleProvider.subjects.toList();
+
+    await Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => ClassModePage(
+          detectedSubject: subject,
+          scheduleEntry: entry,
+          subjects: subjects,
+        ),
+      ),
+    );
+
+    classMode.setOpen(false);
+    classMode.markDismissed();
+  }
+
+  void _pushEditSubject(BuildContext context, Subject subject) =>
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => AddSubjectPage(subject: subject)),
       );
 
   void _confirmDeleteSubject(
@@ -147,6 +214,7 @@ class _EmptyState extends StatelessWidget {
 class _SubjectCard extends StatelessWidget {
   final Subject subject;
   final List<ScheduleEntry> entries;
+  final VoidCallback onEditSubject;
   final VoidCallback onDeleteSubject;
   final VoidCallback onAddEntry;
   final void Function(ScheduleEntry) onDeleteEntry;
@@ -154,6 +222,7 @@ class _SubjectCard extends StatelessWidget {
   const _SubjectCard({
     required this.subject,
     required this.entries,
+    required this.onEditSubject,
     required this.onDeleteSubject,
     required this.onAddEntry,
     required this.onDeleteEntry,
@@ -163,6 +232,10 @@ class _SubjectCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final professor = subject.professor?.trim();
+    final classroom = subject.classroom?.trim();
+    final hasProfessor = professor != null && professor.isNotEmpty;
+    final hasClassroom = classroom != null && classroom.isNotEmpty;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -192,13 +265,50 @@ class _SubjectCard extends StatelessWidget {
                         ?.copyWith(fontWeight: FontWeight.w600),
                   ),
                 ),
-                IconButton(
-                  icon: Icon(Icons.delete_outline, color: cs.error),
-                  tooltip: 'Delete subject',
-                  onPressed: onDeleteSubject,
+                PopupMenuButton<_SubjectMenuAction>(
+                  tooltip: 'Subject options',
+                  onSelected: (action) {
+                    switch (action) {
+                      case _SubjectMenuAction.edit:
+                        onEditSubject();
+                        return;
+                      case _SubjectMenuAction.delete:
+                        onDeleteSubject();
+                        return;
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: _SubjectMenuAction.edit,
+                      child: Text('Edit subject'),
+                    ),
+                    PopupMenuItem(
+                      value: _SubjectMenuAction.delete,
+                      child: Text(
+                        'Delete subject',
+                        style: TextStyle(color: cs.error),
+                      ),
+                    ),
+                  ],
+                  icon: const Icon(Icons.more_vert),
                 ),
               ],
             ),
+            if (hasProfessor || hasClassroom) ...[
+              const SizedBox(height: 6),
+              if (hasProfessor)
+                Text(
+                  'Professor: $professor',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: cs.onSurfaceVariant),
+                ),
+              if (hasClassroom)
+                Text(
+                  'Room: $classroom',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: cs.onSurfaceVariant),
+                ),
+            ],
             // ── Schedule entries ─────────────────────────────────────────────
             if (entries.isEmpty)
               Padding(
@@ -233,6 +343,8 @@ class _SubjectCard extends StatelessWidget {
     );
   }
 }
+
+enum _SubjectMenuAction { edit, delete }
 
 // ── Schedule row ──────────────────────────────────────────────────────────────
 

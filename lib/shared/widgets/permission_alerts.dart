@@ -10,7 +10,7 @@ class PermissionAlerts {
       context,
       title: 'Permission needed',
       message:
-          'We need camera and media permissions to capture whiteboard photos and store your class notes.',
+          'We need camera permission to capture whiteboard photos for your notes.',
       primaryLabel: 'Try again',
       onPrimary: () => Navigator.of(context).pop(),
       secondaryLabel: 'Not now',
@@ -23,7 +23,7 @@ class PermissionAlerts {
       context,
       title: 'Enable permissions in Settings',
       message:
-          'Camera or media permission is permanently denied. Open app settings to allow access and continue capturing whiteboards.',
+          'Camera permission is permanently denied. Open app settings to allow access and continue capturing whiteboards.',
       primaryLabel: 'Open Settings',
       onPrimary: () async {
         Navigator.of(context).pop();

@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:permission_handler/permission_handler.dart';
 
 enum PermissionFlowResult {
@@ -14,49 +12,20 @@ class PermissionService {
   static final PermissionService instance = PermissionService._();
 
   Future<PermissionFlowResult> ensureCameraFlowPermissions() async {
-    final cameraStatus = await Permission.camera.request();
-    final mediaStatuses = await _requestMediaPermissions();
+    final current = await Permission.camera.status;
+    if (current.isGranted) {
+      return PermissionFlowResult.granted;
+    }
 
-    final cameraGranted = cameraStatus.isGranted;
-    final mediaGranted = _isMediaGranted(mediaStatuses);
-
-    if (cameraGranted && mediaGranted) return PermissionFlowResult.granted;
-
-    final cameraPermanentlyDenied = cameraStatus.isPermanentlyDenied;
-    final mediaPermanentlyDenied = _isMediaPermanentlyDenied(mediaStatuses);
-    if (cameraPermanentlyDenied || mediaPermanentlyDenied) {
+    if (current.isPermanentlyDenied || current.isRestricted) {
       return PermissionFlowResult.permanentlyDenied;
     }
 
+    final requested = await Permission.camera.request();
+    if (requested.isGranted) return PermissionFlowResult.granted;
+    if (requested.isPermanentlyDenied || requested.isRestricted) {
+      return PermissionFlowResult.permanentlyDenied;
+    }
     return PermissionFlowResult.denied;
-  }
-
-  Future<List<PermissionStatus>> _requestMediaPermissions() async {
-    final statuses = <PermissionStatus>[];
-
-    // Keep media access explicit per UX requirement.
-    if (Platform.isIOS) {
-      statuses.add(await Permission.photos.request());
-      return statuses;
-    }
-
-    if (Platform.isAndroid) {
-      statuses.add(await Permission.photos.request());
-      statuses.add(await Permission.storage.request());
-    }
-
-    return statuses;
-  }
-
-  bool _isMediaGranted(List<PermissionStatus> statuses) {
-    if (statuses.isEmpty) return true;
-    return statuses.any((status) => status.isGranted || status.isLimited);
-  }
-
-  bool _isMediaPermanentlyDenied(List<PermissionStatus> statuses) {
-    if (statuses.isEmpty) return false;
-    final mediaGranted = _isMediaGranted(statuses);
-    if (mediaGranted) return false;
-    return statuses.every((status) => status.isPermanentlyDenied);
   }
 }
