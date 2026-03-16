@@ -38,6 +38,9 @@ dependencies:
   # Runtime permission handling
   permission_handler: ^11.3.1
 
+  # Optional gallery export for captured photos
+  gal: ^2.3.1
+
   # Simple key/value settings
   shared_preferences: ^2.3.2
 

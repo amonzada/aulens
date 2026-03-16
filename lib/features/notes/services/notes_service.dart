@@ -16,6 +16,8 @@ class NotesService {
 
   Future<int> createNote(Note note) => _db.insertNote(note);
 
+  Future<int> updateNote(Note note) => _db.updateNote(note);
+
   Future<int> updateNoteOcrText(int id, String? ocrText) =>
       _db.updateNoteOcrText(id, ocrText);
 

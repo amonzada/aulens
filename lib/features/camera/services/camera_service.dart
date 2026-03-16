@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:image_picker/image_picker.dart';
+import 'package:gal/gal.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -50,7 +51,7 @@ class CameraService {
   /// permanent location and returns that absolute path.
   ///
   /// Returns `null` if the user dismissed the camera without taking a photo.
-  Future<String?> capturePhoto() async {
+  Future<String?> capturePhoto({bool saveToGallery = false}) async {
     final XFile? file = await _picker.pickImage(
       source: ImageSource.camera,
       imageQuality: 85,
@@ -58,7 +59,7 @@ class CameraService {
       maxHeight: 1920,
     );
     if (file == null) return null;
-    return _persist(file);
+    return _persist(file, saveToGallery: saveToGallery);
   }
 
   /// Preloads camera dependencies and storage paths to reduce first-use latency.
@@ -155,11 +156,22 @@ class CameraService {
     }
   }
 
-  Future<String> _persist(XFile file) async {
+  Future<String> _persist(XFile file, {required bool saveToGallery}) async {
     final dirPath = await _ensureImagesDir();
     final ts = DateTime.now().millisecondsSinceEpoch;
     final dest = p.join(dirPath, 'wb_$ts.jpg');
     await File(file.path).copy(dest);
+
+    // Keep `dest` as the canonical in-app path. Gallery export is optional
+    // and best-effort, so failures never break note capture or internal storage.
+    if (saveToGallery) {
+      try {
+        await Gal.putImage(dest, album: 'Aulens');
+      } catch (_) {
+        // Ignore gallery export errors to preserve capture reliability.
+      }
+    }
+
     return dest;
   }
 

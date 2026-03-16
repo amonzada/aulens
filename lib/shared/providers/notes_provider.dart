@@ -110,6 +110,26 @@ class NotesProvider extends ChangeNotifier {
     _safeNotify();
   }
 
+  Future<void> moveNoteToSubject({
+    required int noteId,
+    required int targetSubjectId,
+  }) async {
+    final idx = _notes.indexWhere((n) => n.id == noteId);
+    if (idx == -1) return;
+
+    final current = _notes[idx];
+    if (current.subjectId == targetSubjectId) return;
+
+    final updated = current.copyWith(subjectId: targetSubjectId);
+    await _notesService.updateNote(updated);
+
+    _notes = [
+      for (final note in _notes)
+        if (note.id == noteId) updated else note,
+    ];
+    _safeNotify();
+  }
+
   /// Removes all notes of a subject from memory after DB-level cascade delete.
   void removeNotesBySubject(int subjectId) {
     _notes = _notes.where((n) => n.subjectId != subjectId).toList();
@@ -257,18 +277,13 @@ class NotesProvider extends ChangeNotifier {
       case CameraTaskStatus.queued:
       case CameraTaskStatus.processingOcr:
       case CameraTaskStatus.savingNote:
-        _processingNotes[event.taskId] = ProcessingNote(
-          taskId: event.taskId,
-          subjectId: event.subjectId,
-          imagePath: event.imagePath,
-          createdAt: event.createdAt,
-          failed: false,
-        );
-        _safeNotify();
+        // Keep OCR fully silent in the UI; the note is already saved and OCR
+        // result will be applied asynchronously when completed.
         return;
       case CameraTaskStatus.completed:
-        _processingNotes.remove(event.taskId);
-        _safeNotify();
+        if (_processingNotes.remove(event.taskId) != null) {
+          _safeNotify();
+        }
         return;
       case CameraTaskStatus.failed:
         final current = _processingNotes[event.taskId];

@@ -8,10 +8,12 @@ class SettingsProvider extends ChangeNotifier {
 
   int _preGraceMinutes = AppConstants.sessionPreGraceMinutes;
   int _postGraceMinutes = AppConstants.sessionPostGraceMinutes;
+  bool _savePhotosToGallery = false;
   bool _loading = false;
 
   int get preGraceMinutes => _preGraceMinutes;
   int get postGraceMinutes => _postGraceMinutes;
+  bool get savePhotosToGallery => _savePhotosToGallery;
   bool get loading => _loading;
 
   SettingsProvider(this._service) {
@@ -23,6 +25,7 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
     _preGraceMinutes = await _service.getPreGraceMinutes();
     _postGraceMinutes = await _service.getPostGraceMinutes();
+    _savePhotosToGallery = await _service.getSavePhotosToGallery();
     _loading = false;
     notifyListeners();
   }
@@ -37,5 +40,11 @@ class SettingsProvider extends ChangeNotifier {
     _postGraceMinutes = value;
     notifyListeners();
     await _service.setPostGraceMinutes(value);
+  }
+
+  Future<void> updateSavePhotosToGallery(bool value) async {
+    _savePhotosToGallery = value;
+    notifyListeners();
+    await _service.setSavePhotosToGallery(value);
   }
 }

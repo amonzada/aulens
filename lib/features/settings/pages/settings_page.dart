@@ -41,6 +41,20 @@ class SettingsPage extends StatelessWidget {
                 .bodySmall
                 ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
+          const SizedBox(height: 24),
+          Text('Photo storage', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 12),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Save photos to device gallery'),
+            subtitle: Text(
+              settings.savePhotosToGallery
+                  ? 'ON: Captured photos are kept in app storage and also copied to the gallery.'
+                  : 'OFF: Captured photos stay only inside app storage.',
+            ),
+            value: settings.savePhotosToGallery,
+            onChanged: settings.updateSavePhotosToGallery,
+          ),
         ],
       ),
     );

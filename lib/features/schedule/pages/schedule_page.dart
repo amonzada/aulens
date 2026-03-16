@@ -49,25 +49,79 @@ class SchedulePage extends StatelessWidget {
           if (provider.subjects.isEmpty) {
             return _EmptyState(onAdd: () => _pushAddSubject(context));
           }
-          return ListView.builder(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
-            itemCount: provider.subjects.length,
-            itemBuilder: (context, i) {
-              final subject = provider.subjects[i];
-              final entries = provider.entriesForSubject(subject.id!);
-              return _SubjectCard(
-                subject: subject,
-                entries: entries,
-                onEditSubject: () =>
-                  _pushEditSubject(context, subject),
-                onDeleteSubject: () =>
-                  _confirmDeleteSubject(context, provider, subject),
-                onAddEntry: () =>
-                    _pushAddSchedule(context, subject),
-                onDeleteEntry: (e) =>
-                    provider.deleteScheduleEntry(e.id!),
-              );
-            },
+          final unscheduledSubjects = provider.subjects
+              .where((s) => provider.entriesForSubject(s.id!).isEmpty)
+              .toList()
+            ..sort((a, b) => a.name.compareTo(b.name));
+
+          final weekdayItems = {
+            for (var day = 1; day <= 7; day++) day: <_ScheduleBlockItem>[],
+          };
+
+          final sortedEntries = provider.entries.toList()
+            ..sort((a, b) {
+              final byDay = a.weekday.compareTo(b.weekday);
+              if (byDay != 0) return byDay;
+              final byStart = a.startTime.compareTo(b.startTime);
+              if (byStart != 0) return byStart;
+              final aName = provider.subjectById(a.subjectId)?.name ?? '';
+              final bName = provider.subjectById(b.subjectId)?.name ?? '';
+              return aName.compareTo(bName);
+            });
+
+          for (final entry in sortedEntries) {
+            final subject = provider.subjectById(entry.subjectId);
+            if (subject == null) continue;
+            weekdayItems[entry.weekday]!.add(
+              _ScheduleBlockItem(subject: subject, entry: entry),
+            );
+          }
+
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 88),
+            children: [
+              if (unscheduledSubjects.isNotEmpty) ...[
+                const _SectionHeader(title: 'Unscheduled'),
+                const SizedBox(height: 8),
+                _ScheduleGridSection(
+                  items: unscheduledSubjects
+                      .map((s) => _ScheduleBlockItem(subject: s))
+                      .toList(),
+                  onOpenSubject: (subject) => _pushAddSchedule(context, subject),
+                  onEditSubject: (subject) => _pushEditSubject(context, subject),
+                  onDeleteSubject: (subject) =>
+                      _confirmDeleteSubject(context, provider, subject),
+                  onDeleteEntry: (entry) => provider.deleteScheduleEntry(entry.id!),
+                ),
+                const SizedBox(height: 14),
+              ],
+              ...List.generate(7, (index) {
+                final day = index + 1;
+                final items = weekdayItems[day]!;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _SectionHeader(title: AppConstants.weekdayNames[index]),
+                    const SizedBox(height: 8),
+                    if (items.isEmpty)
+                      const _EmptyDayHint()
+                    else
+                      _ScheduleGridSection(
+                        items: items,
+                        onOpenSubject: (subject) =>
+                            _pushAddSchedule(context, subject),
+                        onEditSubject: (subject) =>
+                            _pushEditSubject(context, subject),
+                        onDeleteSubject: (subject) =>
+                            _confirmDeleteSubject(context, provider, subject),
+                        onDeleteEntry: (entry) =>
+                            provider.deleteScheduleEntry(entry.id!),
+                      ),
+                    const SizedBox(height: 14),
+                  ],
+                );
+              }),
+            ],
           );
         },
       ),
@@ -209,22 +263,108 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-// ── Subject card ──────────────────────────────────────────────────────────────
+enum _SubjectMenuAction { edit, delete }
 
-class _SubjectCard extends StatelessWidget {
+class _ScheduleBlockItem {
   final Subject subject;
-  final List<ScheduleEntry> entries;
-  final VoidCallback onEditSubject;
-  final VoidCallback onDeleteSubject;
-  final VoidCallback onAddEntry;
-  final void Function(ScheduleEntry) onDeleteEntry;
+  final ScheduleEntry? entry;
 
-  const _SubjectCard({
-    required this.subject,
-    required this.entries,
+  const _ScheduleBlockItem({required this.subject, this.entry});
+
+  bool get isUnscheduled => entry == null;
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+
+  const _SectionHeader({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Text(
+      title,
+      style: theme.textTheme.titleMedium?.copyWith(
+        fontWeight: FontWeight.w700,
+      ),
+    );
+  }
+}
+
+class _EmptyDayHint extends StatelessWidget {
+  const _EmptyDayHint();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(left: 2, bottom: 6),
+      child: Text(
+        'No classes.',
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+              fontStyle: FontStyle.italic,
+            ),
+      ),
+    );
+  }
+}
+
+class _ScheduleGridSection extends StatelessWidget {
+  final List<_ScheduleBlockItem> items;
+  final ValueChanged<Subject> onOpenSubject;
+  final ValueChanged<Subject> onEditSubject;
+  final ValueChanged<Subject> onDeleteSubject;
+  final ValueChanged<ScheduleEntry> onDeleteEntry;
+
+  const _ScheduleGridSection({
+    required this.items,
+    required this.onOpenSubject,
     required this.onEditSubject,
     required this.onDeleteSubject,
-    required this.onAddEntry,
+    required this.onDeleteEntry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: items.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+        childAspectRatio: 1.03,
+      ),
+      itemBuilder: (context, index) {
+        final item = items[index];
+        return _ScheduleBlockCard(
+          item: item,
+          onTap: () => onOpenSubject(item.subject),
+          onEditSubject: () => onEditSubject(item.subject),
+          onDeleteSubject: () => onDeleteSubject(item.subject),
+          onDeleteEntry: item.entry == null
+              ? null
+              : () => onDeleteEntry(item.entry!),
+        );
+      },
+    );
+  }
+}
+
+class _ScheduleBlockCard extends StatelessWidget {
+  final _ScheduleBlockItem item;
+  final VoidCallback onTap;
+  final VoidCallback onEditSubject;
+  final VoidCallback onDeleteSubject;
+  final VoidCallback? onDeleteEntry;
+
+  const _ScheduleBlockCard({
+    required this.item,
+    required this.onTap,
+    required this.onEditSubject,
+    required this.onDeleteSubject,
     required this.onDeleteEntry,
   });
 
@@ -232,154 +372,132 @@ class _SubjectCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final professor = subject.professor?.trim();
-    final classroom = subject.classroom?.trim();
+    final professor = item.subject.professor?.trim();
+    final classroom = item.subject.classroom?.trim();
     final hasProfessor = professor != null && professor.isNotEmpty;
     final hasClassroom = classroom != null && classroom.isNotEmpty;
+    final entry = item.entry;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Header ──────────────────────────────────────────────────────
-            Row(
-              children: [
-                CircleAvatar(
-                  backgroundColor: cs.primaryContainer,
-                  child: Text(
-                    subject.name[0].toUpperCase(),
-                    style: TextStyle(
-                      color: cs.onPrimaryContainer,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    subject.name,
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w600),
-                  ),
-                ),
-                PopupMenuButton<_SubjectMenuAction>(
-                  tooltip: 'Subject options',
-                  onSelected: (action) {
-                    switch (action) {
-                      case _SubjectMenuAction.edit:
-                        onEditSubject();
-                        return;
-                      case _SubjectMenuAction.delete:
-                        onDeleteSubject();
-                        return;
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: _SubjectMenuAction.edit,
-                      child: Text('Edit subject'),
-                    ),
-                    PopupMenuItem(
-                      value: _SubjectMenuAction.delete,
-                      child: Text(
-                        'Delete subject',
-                        style: TextStyle(color: cs.error),
+    return Material(
+      color: item.isUnscheduled
+          ? cs.surfaceContainerLow
+          : cs.primaryContainer.withValues(alpha: 0.35),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      item.subject.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                  ],
-                  icon: const Icon(Icons.more_vert),
-                ),
-              ],
-            ),
-            if (hasProfessor || hasClassroom) ...[
-              const SizedBox(height: 6),
+                  ),
+                  PopupMenuButton<_SubjectMenuAction>(
+                    tooltip: 'Subject options',
+                    onSelected: (action) {
+                      switch (action) {
+                        case _SubjectMenuAction.edit:
+                          onEditSubject();
+                          return;
+                        case _SubjectMenuAction.delete:
+                          onDeleteSubject();
+                          return;
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: _SubjectMenuAction.edit,
+                        child: Text('Edit subject'),
+                      ),
+                      PopupMenuItem(
+                        value: _SubjectMenuAction.delete,
+                        child: Text(
+                          'Delete subject',
+                          style: TextStyle(color: cs.error),
+                        ),
+                      ),
+                    ],
+                    icon: const Icon(Icons.more_horiz, size: 18),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 24,
+                      height: 24,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
               if (hasProfessor)
                 Text(
-                  'Professor: $professor',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: cs.onSurfaceVariant),
+                  professor,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
                 ),
               if (hasClassroom)
-                Text(
-                  'Room: $classroom',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: cs.onSurfaceVariant),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    classroom,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
                 ),
-            ],
-            // ── Schedule entries ─────────────────────────────────────────────
-            if (entries.isEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  'No schedule added.',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: cs.onSurfaceVariant),
-                ),
-              )
-            else ...[
-              const Divider(height: 20),
-              ...entries.map(
-                (e) => _ScheduleRow(
-                  entry: e,
-                  onDelete: () => onDeleteEntry(e),
-                ),
+              const Spacer(),
+              Row(
+                children: [
+                  Icon(
+                    Icons.schedule,
+                    size: 14,
+                    color: cs.primary,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      entry == null
+                          ? 'No scheduled time'
+                          : '${entry.startTime} – ${entry.endTime}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (onDeleteEntry != null)
+                    InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: onDeleteEntry,
+                      child: Padding(
+                        padding: const EdgeInsets.all(3),
+                        child: Icon(
+                          Icons.close,
+                          size: 15,
+                          color: cs.outline,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ],
-            const SizedBox(height: 4),
-            TextButton.icon(
-              onPressed: onAddEntry,
-              icon: const Icon(Icons.add, size: 16),
-              label: const Text('Add Schedule'),
-              style: TextButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
-    );
-  }
-}
-
-enum _SubjectMenuAction { edit, delete }
-
-// ── Schedule row ──────────────────────────────────────────────────────────────
-
-class _ScheduleRow extends StatelessWidget {
-  final ScheduleEntry entry;
-  final VoidCallback onDelete;
-
-  const _ScheduleRow({required this.entry, required this.onDelete});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(Icons.schedule, size: 16, color: cs.primary),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 92,
-            child: Text(
-              AppConstants.weekdayNames[entry.weekday - 1],
-              style: const TextStyle(fontWeight: FontWeight.w500),
-            ),
-          ),
-          Text(
-            '${entry.startTime} – ${entry.endTime}',
-            style: TextStyle(color: cs.onSurfaceVariant),
-          ),
-          const Spacer(),
-          GestureDetector(
-            onTap: onDelete,
-            child: Icon(Icons.close, size: 16, color: cs.outlineVariant),
-          ),
-        ],
       ),
     );
   }

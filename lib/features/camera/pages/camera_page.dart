@@ -37,6 +37,7 @@ class _CameraPageState extends State<CameraPage> {
   String? _imagePath;
   Subject? _detectedSubject; // auto-detected, shown as a hint
   Subject? _selectedSubject; // what will actually be saved
+  bool _requiresManualSubjectSelection = false;
   bool _saving = false;
   bool _autoCaptureDone = false;
 
@@ -83,7 +84,9 @@ class _CameraPageState extends State<CameraPage> {
     String? path;
     try {
       // 1. Take photo and persist to documents directory.
-      path = await CameraService.instance.capturePhoto();
+      path = await CameraService.instance.capturePhoto(
+        saveToGallery: settings.savePhotosToGallery,
+      );
     } catch (_) {
       if (!mounted) return;
       setState(() => _state = _CaptureState.idle);
@@ -111,12 +114,15 @@ class _CameraPageState extends State<CameraPage> {
           )
         : null;
     final subject = widget.fixedSubject ?? detected;
+    final requiresManualSelection =
+        widget.fixedSubject == null && detected == null;
 
     if (!mounted) return;
     setState(() {
       _imagePath = path;
       _detectedSubject = detected;
       _selectedSubject = subject; // pre-select the detected or fixed subject
+      _requiresManualSubjectSelection = requiresManualSelection;
       _state = _CaptureState.preview;
     });
   }
@@ -195,8 +201,8 @@ class _CameraPageState extends State<CameraPage> {
     }
 
     if (!mounted) return;
-    AppSnackBar.showInfo(context, 'Processing OCR in background...');
-    _reset();
+    _resetToIdle();
+    _capture();
   }
 
   Future<void> _discard() async {
@@ -205,14 +211,15 @@ class _CameraPageState extends State<CameraPage> {
     if (path != null) {
       await CameraService.instance.deleteCapturedPhotoIfOwned(path);
     }
-    _reset();
+    _resetToIdle();
   }
 
-  void _reset() => setState(() {
+  void _resetToIdle() => setState(() {
         _state = _CaptureState.idle;
         _imagePath = null;
         _detectedSubject = null;
         _selectedSubject = null;
+        _requiresManualSubjectSelection = false;
         _saving = false;
       });
 
@@ -230,8 +237,9 @@ class _CameraPageState extends State<CameraPage> {
             detectedSubject: _detectedSubject,
             selectedSubject: _selectedSubject,
             subjects: context.watch<ScheduleProvider>().subjects.toList(),
+            requiresManualSubjectSelection: _requiresManualSubjectSelection,
             onSubjectChanged: (s) => setState(() => _selectedSubject = s),
-            onSave: _save,
+            onUsePhoto: _save,
             onDiscard: () {
               _discard();
             },
@@ -310,8 +318,9 @@ class _PreviewView extends StatelessWidget {
   final Subject? detectedSubject;
   final Subject? selectedSubject;
   final List<Subject> subjects;
+  final bool requiresManualSubjectSelection;
   final ValueChanged<Subject?> onSubjectChanged;
-  final VoidCallback onSave;
+  final VoidCallback onUsePhoto;
   final VoidCallback onDiscard;
   final bool isSaving;
 
@@ -320,8 +329,9 @@ class _PreviewView extends StatelessWidget {
     required this.detectedSubject,
     required this.selectedSubject,
     required this.subjects,
+    required this.requiresManualSubjectSelection,
     required this.onSubjectChanged,
-    required this.onSave,
+    required this.onUsePhoto,
     required this.onDiscard,
     required this.isSaving,
   });
@@ -374,6 +384,12 @@ class _PreviewView extends StatelessWidget {
                     'No subjects found. Add subjects in the Schedule tab first.',
                     style: TextStyle(color: cs.error),
                   )
+                else if (!requiresManualSubjectSelection)
+                  Text(
+                    'This photo will be saved automatically to ${selectedSubject?.name ?? 'the detected class'}.',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: cs.onSurfaceVariant),
+                  )
                 else
                   DropdownButtonFormField<Subject>(
                     initialValue: selectedSubject,
@@ -393,7 +409,7 @@ class _PreviewView extends StatelessWidget {
                 Text('OCR', style: theme.textTheme.labelMedium),
                 const SizedBox(height: 4),
                 Text(
-                  'Text extraction runs in the background after you tap Save.',
+                  'Text extraction runs in the background after confirmation.',
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: cs.onSurfaceVariant),
                 ),
@@ -415,15 +431,15 @@ class _PreviewView extends StatelessWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       child: FilledButton.icon(
-                        onPressed: isSaving ? null : onSave,
+                        onPressed: isSaving ? null : onUsePhoto,
                         icon: isSaving
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               )
-                            : const Icon(Icons.save_outlined),
-                        label: Text(isSaving ? 'Saving...' : 'Save Note'),
+                            : const Icon(Icons.check_circle_outline),
+                        label: Text(isSaving ? 'Saving...' : 'Use Photo'),
                       ),
                     ),
                   ],

@@ -49,6 +49,21 @@ class ScheduleProvider extends ChangeNotifier {
     String? professor,
     String? classroom,
   }) async {
+    await addSubjectWithOptionalSchedule(
+      name: name,
+      professor: professor,
+      classroom: classroom,
+    );
+  }
+
+  Future<void> addSubjectWithOptionalSchedule({
+    required String name,
+    String? professor,
+    String? classroom,
+    int? weekday,
+    String? startTime,
+    String? endTime,
+  }) async {
     final trimmed = name.trim();
     final normalizedProfessor = professor?.trim().isEmpty == true
         ? null
@@ -71,6 +86,18 @@ class ScheduleProvider extends ChangeNotifier {
         classroom: normalizedClassroom,
       ),
     ];
+
+    if (weekday != null && startTime != null && endTime != null) {
+      final entry = ScheduleEntry(
+        subjectId: id,
+        weekday: weekday,
+        startTime: startTime,
+        endTime: endTime,
+      );
+      final entryId = await _service.createScheduleEntry(entry);
+      _entries = [..._entries, entry.copyWith(id: entryId)];
+    }
+
     _safeNotify();
   }
 
