@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../notes/pages/subject_timeline_page.dart';
 import '../../../shared/providers/class_mode_controller.dart';
 import '../../../shared/providers/notes_provider.dart';
 import '../../../shared/providers/schedule_provider.dart';
@@ -11,7 +12,6 @@ import '../../settings/pages/settings_page.dart';
 import '../models/schedule_entry.dart';
 import '../models/subject.dart';
 import '../../class_mode/pages/class_mode_page.dart';
-import 'add_schedule_page.dart';
 import 'add_subject_page.dart';
 
 /// Main schedule screen – displays subjects and their weekly time slots.
@@ -73,7 +73,11 @@ class SchedulePage extends StatelessWidget {
             final subject = provider.subjectById(entry.subjectId);
             if (subject == null) continue;
             weekdayItems[entry.weekday]!.add(
-              _ScheduleBlockItem(subject: subject, entry: entry),
+              _ScheduleBlockItem(
+                subject: subject,
+                entry: entry,
+                entryLabel: provider.scheduleEntryLabel(entry),
+              ),
             );
           }
 
@@ -87,36 +91,33 @@ class SchedulePage extends StatelessWidget {
                   items: unscheduledSubjects
                       .map((s) => _ScheduleBlockItem(subject: s))
                       .toList(),
-                  onOpenSubject: (subject) => _pushAddSchedule(context, subject),
+                  onOpenSubject: (subject) => _openSubjectTimeline(context, subject),
                   onEditSubject: (subject) => _pushEditSubject(context, subject),
                   onDeleteSubject: (subject) =>
                       _confirmDeleteSubject(context, provider, subject),
-                  onDeleteEntry: (entry) => provider.deleteScheduleEntry(entry.id!),
                 ),
                 const SizedBox(height: 14),
               ],
               ...List.generate(7, (index) {
                 final day = index + 1;
                 final items = weekdayItems[day]!;
+                if (items.isEmpty) {
+                  return const SizedBox.shrink();
+                }
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _SectionHeader(title: AppConstants.weekdayNames[index]),
                     const SizedBox(height: 8),
-                    if (items.isEmpty)
-                      const _EmptyDayHint()
-                    else
-                      _ScheduleGridSection(
-                        items: items,
-                        onOpenSubject: (subject) =>
-                            _pushAddSchedule(context, subject),
-                        onEditSubject: (subject) =>
-                            _pushEditSubject(context, subject),
-                        onDeleteSubject: (subject) =>
-                            _confirmDeleteSubject(context, provider, subject),
-                        onDeleteEntry: (entry) =>
-                            provider.deleteScheduleEntry(entry.id!),
-                      ),
+                    _ScheduleGridSection(
+                      items: items,
+                      onOpenSubject: (subject) =>
+                        _openSubjectTimeline(context, subject),
+                      onEditSubject: (subject) =>
+                          _pushEditSubject(context, subject),
+                      onDeleteSubject: (subject) =>
+                          _confirmDeleteSubject(context, provider, subject),
+                    ),
                     const SizedBox(height: 14),
                   ],
                 );
@@ -131,12 +132,6 @@ class SchedulePage extends StatelessWidget {
   void _pushAddSubject(BuildContext context) => Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const AddSubjectPage()),
-      );
-
-  void _pushAddSchedule(BuildContext context, Subject subject) =>
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => AddSchedulePage(subject: subject)),
       );
 
   void _openSettings(BuildContext context) => Navigator.push(
@@ -183,6 +178,12 @@ class SchedulePage extends StatelessWidget {
       Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => AddSubjectPage(subject: subject)),
+      );
+
+  void _openSubjectTimeline(BuildContext context, Subject subject) =>
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => SubjectTimelinePage(subject: subject)),
       );
 
   void _confirmDeleteSubject(
@@ -263,16 +264,17 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-enum _SubjectMenuAction { edit, delete }
-
 class _ScheduleBlockItem {
   final Subject subject;
   final ScheduleEntry? entry;
+  final String? entryLabel;
 
-  const _ScheduleBlockItem({required this.subject, this.entry});
+  const _ScheduleBlockItem({required this.subject, this.entry, this.entryLabel});
 
   bool get isUnscheduled => entry == null;
 }
+
+enum _SubjectMenuAction { edit, delete }
 
 class _SectionHeader extends StatelessWidget {
   final String title;
@@ -291,38 +293,17 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-class _EmptyDayHint extends StatelessWidget {
-  const _EmptyDayHint();
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(left: 2, bottom: 6),
-      child: Text(
-        'No classes.',
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: cs.onSurfaceVariant,
-              fontStyle: FontStyle.italic,
-            ),
-      ),
-    );
-  }
-}
-
 class _ScheduleGridSection extends StatelessWidget {
   final List<_ScheduleBlockItem> items;
   final ValueChanged<Subject> onOpenSubject;
   final ValueChanged<Subject> onEditSubject;
   final ValueChanged<Subject> onDeleteSubject;
-  final ValueChanged<ScheduleEntry> onDeleteEntry;
 
   const _ScheduleGridSection({
     required this.items,
     required this.onOpenSubject,
     required this.onEditSubject,
     required this.onDeleteSubject,
-    required this.onDeleteEntry,
   });
 
   @override
@@ -344,9 +325,6 @@ class _ScheduleGridSection extends StatelessWidget {
           onTap: () => onOpenSubject(item.subject),
           onEditSubject: () => onEditSubject(item.subject),
           onDeleteSubject: () => onDeleteSubject(item.subject),
-          onDeleteEntry: item.entry == null
-              ? null
-              : () => onDeleteEntry(item.entry!),
         );
       },
     );
@@ -358,14 +336,12 @@ class _ScheduleBlockCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onEditSubject;
   final VoidCallback onDeleteSubject;
-  final VoidCallback? onDeleteEntry;
 
   const _ScheduleBlockCard({
     required this.item,
     required this.onTap,
     required this.onEditSubject,
     required this.onDeleteSubject,
-    required this.onDeleteEntry,
   });
 
   @override
@@ -395,7 +371,7 @@ class _ScheduleBlockCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      item.subject.name,
+                      item.entryLabel ?? item.subject.name,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleSmall?.copyWith(
@@ -480,19 +456,6 @@ class _ScheduleBlockCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (onDeleteEntry != null)
-                    InkWell(
-                      borderRadius: BorderRadius.circular(20),
-                      onTap: onDeleteEntry,
-                      child: Padding(
-                        padding: const EdgeInsets.all(3),
-                        child: Icon(
-                          Icons.close,
-                          size: 15,
-                          color: cs.outline,
-                        ),
-                      ),
-                    ),
                 ],
               ),
             ],

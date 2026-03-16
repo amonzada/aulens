@@ -72,7 +72,7 @@ class _SessionCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  dateLabel,
+                  '${session.title} · $dateLabel',
                   style: theme.textTheme.titleSmall
                       ?.copyWith(fontWeight: FontWeight.w700),
                 ),

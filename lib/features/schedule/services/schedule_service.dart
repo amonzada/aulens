@@ -37,6 +37,10 @@ class ScheduleService {
     return _db.insertScheduleEntry(entry);
   }
 
+  Future<int> updateScheduleEntry(ScheduleEntry entry) {
+    return _db.updateScheduleEntry(entry);
+  }
+
   Future<int> deleteScheduleEntry(int id) => _db.deleteScheduleEntry(id);
 
   Future<int> upsertSessionOverride({

@@ -161,11 +161,57 @@ class ScheduleProvider extends ChangeNotifier {
     _safeNotify();
   }
 
+  Future<void> updateScheduleEntryTitle({
+    required int id,
+    String? title,
+  }) async {
+    final entryIndex = _entries.indexWhere((e) => e.id == id);
+    if (entryIndex == -1) return;
+
+    final current = _entries[entryIndex];
+    final normalizedTitle = title?.trim().isEmpty == true ? null : title?.trim();
+    final updated = current.copyWith(title: normalizedTitle);
+
+    await _service.updateScheduleEntry(updated);
+    _entries = [
+      for (final entry in _entries)
+        if (entry.id == id) updated else entry,
+    ];
+    _safeNotify();
+  }
+
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   /// All schedule entries that belong to [subjectId].
   List<ScheduleEntry> entriesForSubject(int subjectId) =>
       _entries.where((e) => e.subjectId == subjectId).toList();
+
+  String scheduleEntryLabel(ScheduleEntry entry) {
+    final explicitTitle = entry.title?.trim();
+    if (explicitTitle != null && explicitTitle.isNotEmpty) {
+      return explicitTitle;
+    }
+
+    final sorted = entriesForSubject(entry.subjectId)
+      ..sort((a, b) {
+        final byDay = a.weekday.compareTo(b.weekday);
+        if (byDay != 0) return byDay;
+        final byStart = a.startTime.compareTo(b.startTime);
+        if (byStart != 0) return byStart;
+        return (a.id ?? 0).compareTo(b.id ?? 0);
+      });
+    final index = sorted.indexWhere((candidate) {
+      if (entry.id != null && candidate.id != null) {
+        return candidate.id == entry.id;
+      }
+      return candidate.weekday == entry.weekday &&
+          candidate.startTime == entry.startTime &&
+          candidate.endTime == entry.endTime;
+    });
+
+    final order = index >= 0 ? index + 1 : 1;
+    return 'Aula $order';
+  }
 
   /// Returns the [Subject] with id == [subjectId], or `null` if not found.
   Subject? subjectById(int subjectId) {

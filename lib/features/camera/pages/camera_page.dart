@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -8,13 +6,14 @@ import '../../../shared/providers/schedule_provider.dart';
 import '../../../shared/providers/settings_provider.dart';
 import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/permission_alerts.dart';
+import '../../schedule/models/schedule_entry.dart';
 import '../../schedule/models/subject.dart';
 import '../services/camera_service.dart';
 import '../services/ocr_service.dart';
 import '../services/permission_service.dart';
 
 // ── State machine ─────────────────────────────────────────────────────────────
-enum _CaptureState { idle, processing, preview }
+enum _CaptureState { idle, processing }
 
 /// Camera tab – guides the student through capturing a whiteboard photo,
 /// auto-detecting the current class, running OCR and saving the note.
@@ -34,21 +33,12 @@ class CameraPage extends StatefulWidget {
 
 class _CameraPageState extends State<CameraPage> {
   _CaptureState _state = _CaptureState.idle;
-  String? _imagePath;
-  Subject? _detectedSubject; // auto-detected, shown as a hint
-  Subject? _selectedSubject; // what will actually be saved
-  bool _requiresManualSubjectSelection = false;
   bool _saving = false;
   bool _autoCaptureDone = false;
 
   @override
   void initState() {
     super.initState();
-    if (widget.fixedSubject != null) {
-      _detectedSubject = widget.fixedSubject;
-      _selectedSubject = widget.fixedSubject;
-    }
-
     if (widget.autoCapture) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || _autoCaptureDone) return;
@@ -113,55 +103,52 @@ class _CameraPageState extends State<CameraPage> {
             now,
           )
         : null;
-    final subject = widget.fixedSubject ?? detected;
-    final requiresManualSelection =
-        widget.fixedSubject == null && detected == null;
+    final subject = widget.fixedSubject ??
+        detected ??
+        (scheduleProvider.subjects.isNotEmpty
+            ? scheduleProvider.subjects.first
+            : null);
 
-    if (!mounted) return;
-    setState(() {
-      _imagePath = path;
-      _detectedSubject = detected;
-      _selectedSubject = subject; // pre-select the detected or fixed subject
-      _requiresManualSubjectSelection = requiresManualSelection;
-      _state = _CaptureState.preview;
-    });
+    if (subject == null) {
+      await CameraService.instance.deleteCapturedPhotoIfOwned(path);
+      if (!mounted) return;
+      setState(() {
+        _state = _CaptureState.idle;
+        _saving = false;
+      });
+      AppSnackBar.showInfo(
+        context,
+        'No subjects found. Add subjects in the Schedule tab first.',
+      );
+      return;
+    }
+
+    await _saveCaptured(
+      imagePath: path,
+      selectedSubject: subject,
+      detectedSubject: detected,
+      entry: entry,
+      capturedAt: now,
+    );
   }
 
   // ── Save / discard ─────────────────────────────────────────────────────────
 
-  Future<void> _save() async {
+  Future<void> _saveCaptured({
+    required String imagePath,
+    required Subject selectedSubject,
+    required Subject? detectedSubject,
+    required ScheduleEntry? entry,
+    required DateTime capturedAt,
+  }) async {
     if (_saving) return;
-    if (_selectedSubject == null) {
-      AppSnackBar.showInfo(context, 'Please select a subject first.');
-      return;
-    }
-
-    final subjectId = _selectedSubject!.id;
+    final subjectId = selectedSubject.id;
     if (subjectId == null) {
       AppSnackBar.showError(context, 'Subject is not ready yet.');
       return;
     }
-
-    if (_imagePath == null) {
-      AppSnackBar.showInfo(context, 'No captured image to save.');
-      return;
-    }
-
-    final imagePath = _imagePath!;
     final notesProvider = context.read<NotesProvider>();
     final scheduleProvider = context.read<ScheduleProvider>();
-    final settings = context.read<SettingsProvider>();
-    final now = DateTime.now();
-    final entry = scheduleProvider.getCurrentClass(
-      preGraceMinutes: settings.preGraceMinutes,
-      postGraceMinutes: settings.postGraceMinutes,
-    );
-    final detected = entry != null
-        ? scheduleProvider.resolveSubjectForEntryOnDate(
-            entry,
-            now,
-          )
-        : null;
 
     setState(() => _saving = true);
     try {
@@ -171,12 +158,14 @@ class _CameraPageState extends State<CameraPage> {
         ocrText: null,
       );
 
-      if (entry != null && detected != null && detected.id != subjectId) {
+      if (entry != null &&
+          detectedSubject != null &&
+          detectedSubject.id != subjectId) {
         final entryId = entry.id;
         if (entryId != null) {
           await scheduleProvider.setSessionOverride(
             scheduleEntryId: entryId,
-            date: now,
+            date: capturedAt,
             subjectId: subjectId,
           );
         }
@@ -202,24 +191,10 @@ class _CameraPageState extends State<CameraPage> {
 
     if (!mounted) return;
     _resetToIdle();
-    _capture();
-  }
-
-  Future<void> _discard() async {
-    // Remove the already-persisted image file (user chose not to save).
-    final path = _imagePath;
-    if (path != null) {
-      await CameraService.instance.deleteCapturedPhotoIfOwned(path);
-    }
-    _resetToIdle();
   }
 
   void _resetToIdle() => setState(() {
         _state = _CaptureState.idle;
-        _imagePath = null;
-        _detectedSubject = null;
-        _selectedSubject = null;
-        _requiresManualSubjectSelection = false;
         _saving = false;
       });
 
@@ -232,19 +207,6 @@ class _CameraPageState extends State<CameraPage> {
       body: switch (_state) {
         _CaptureState.idle => _IdleView(onCapture: _capture),
         _CaptureState.processing => const _ProcessingView(),
-        _CaptureState.preview => _PreviewView(
-            imagePath: _imagePath!,
-            detectedSubject: _detectedSubject,
-            selectedSubject: _selectedSubject,
-            subjects: context.watch<ScheduleProvider>().subjects.toList(),
-            requiresManualSubjectSelection: _requiresManualSubjectSelection,
-            onSubjectChanged: (s) => setState(() => _selectedSubject = s),
-            onUsePhoto: _save,
-            onDiscard: () {
-              _discard();
-            },
-            isSaving: _saving,
-          ),
       },
     );
   }
@@ -304,189 +266,7 @@ class _ProcessingView extends StatelessWidget {
         children: [
           CircularProgressIndicator(),
           SizedBox(height: 16),
-          Text('Analysing image…'),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Preview view ──────────────────────────────────────────────────────────────
-
-class _PreviewView extends StatelessWidget {
-  final String imagePath;
-  final Subject? detectedSubject;
-  final Subject? selectedSubject;
-  final List<Subject> subjects;
-  final bool requiresManualSubjectSelection;
-  final ValueChanged<Subject?> onSubjectChanged;
-  final VoidCallback onUsePhoto;
-  final VoidCallback onDiscard;
-  final bool isSaving;
-
-  const _PreviewView({
-    required this.imagePath,
-    required this.detectedSubject,
-    required this.selectedSubject,
-    required this.subjects,
-    required this.requiresManualSubjectSelection,
-    required this.onSubjectChanged,
-    required this.onUsePhoto,
-    required this.onDiscard,
-    required this.isSaving,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return Column(
-      children: [
-        // ── Photo preview ─────────────────────────────────────────────────
-        Expanded(
-          flex: 5,
-          child: Image.file(
-            File(imagePath),
-            fit: BoxFit.cover,
-            width: double.infinity,
-          ),
-        ),
-
-        // ── Info panel ────────────────────────────────────────────────────
-        Expanded(
-          flex: 5,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Detection chip
-                _StatusChip(
-                  icon: detectedSubject != null
-                      ? Icons.auto_awesome
-                      : Icons.info_outline,
-                  label: detectedSubject != null
-                      ? 'Auto-detected: ${detectedSubject!.name}'
-                      : 'No class currently scheduled',
-                  color: detectedSubject != null
-                      ? cs.primaryContainer
-                      : cs.secondaryContainer,
-                  textColor: detectedSubject != null
-                      ? cs.onPrimaryContainer
-                      : cs.onSecondaryContainer,
-                ),
-                const SizedBox(height: 12),
-
-                // Subject selector
-                if (subjects.isEmpty)
-                  Text(
-                    'No subjects found. Add subjects in the Schedule tab first.',
-                    style: TextStyle(color: cs.error),
-                  )
-                else if (!requiresManualSubjectSelection)
-                  Text(
-                    'This photo will be saved automatically to ${selectedSubject?.name ?? 'the detected class'}.',
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: cs.onSurfaceVariant),
-                  )
-                else
-                  DropdownButtonFormField<Subject>(
-                    initialValue: selectedSubject,
-                    decoration: const InputDecoration(
-                      labelText: 'Subject',
-                      prefixIcon: Icon(Icons.school_outlined),
-                    ),
-                    items: subjects
-                        .map((s) =>
-                            DropdownMenuItem(value: s, child: Text(s.name)))
-                        .toList(),
-                    onChanged: onSubjectChanged,
-                  ),
-                const SizedBox(height: 12),
-
-                // OCR processing hint
-                Text('OCR', style: theme.textTheme.labelMedium),
-                const SizedBox(height: 4),
-                Text(
-                  'Text extraction runs in the background after confirmation.',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: cs.onSurfaceVariant),
-                ),
-                const SizedBox(height: 16),
-
-                // Action buttons
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: isSaving ? null : onDiscard,
-                        icon: const Icon(Icons.delete_outline),
-                        label: const Text('Discard'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: cs.error,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: isSaving ? null : onUsePhoto,
-                        icon: isSaving
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.check_circle_outline),
-                        label: Text(isSaving ? 'Saving...' : 'Use Photo'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ── Status chip ───────────────────────────────────────────────────────────────
-
-class _StatusChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final Color textColor;
-
-  const _StatusChip({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.textColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: textColor),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              label,
-              style: TextStyle(color: textColor, fontSize: 13),
-            ),
-          ),
+          Text('Saving photo and starting OCR…'),
         ],
       ),
     );

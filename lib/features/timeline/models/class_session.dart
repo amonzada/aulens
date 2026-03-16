@@ -6,6 +6,7 @@ import '../../notes/models/processing_note.dart';
 /// Aggregates notes and photos that belong to a single class session.
 class ClassSession {
   final Subject subject;
+  final String title;
   final DateTime date;
   final ScheduleEntry? scheduleEntry;
   final List<Note> notes;
@@ -14,6 +15,7 @@ class ClassSession {
 
   const ClassSession({
     required this.subject,
+    required this.title,
     required this.date,
     required this.scheduleEntry,
     required this.notes,

@@ -17,9 +17,16 @@ class AddSchedulePage extends StatefulWidget {
 
 class _AddSchedulePageState extends State<AddSchedulePage> {
   final Set<int> _weekdays = {1}; // 1 = Monday
+  final TextEditingController _titleCtrl = TextEditingController();
   TimeOfDay _start = const TimeOfDay(hour: 8, minute: 0);
   TimeOfDay _end = const TimeOfDay(hour: 10, minute: 0);
   bool _saving = false;
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    super.dispose();
+  }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -73,6 +80,7 @@ class _AddSchedulePageState extends State<AddSchedulePage> {
         .map(
           (day) => ScheduleEntry(
             subjectId: widget.subject.id!,
+            title: _titleCtrl.text.trim().isEmpty ? null : _titleCtrl.text.trim(),
             weekday: day,
             startTime: _fmt(_start),
             endTime: _fmt(_end),
@@ -124,6 +132,18 @@ class _AddSchedulePageState extends State<AddSchedulePage> {
           const SizedBox(height: 24),
 
           // ── Time slot ─────────────────────────────────────────────────────
+          TextField(
+            controller: _titleCtrl,
+            enabled: !_saving,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              labelText: 'Class label (optional)',
+              hintText: 'e.g., Aula prática',
+              prefixIcon: Icon(Icons.title_outlined),
+            ),
+          ),
+          const SizedBox(height: 24),
+
           Text('Time slot', style: theme.textTheme.labelLarge),
           const SizedBox(height: 8),
           Row(

@@ -22,6 +22,7 @@ class NoteDetailPage extends StatefulWidget {
 
 class _NoteDetailPageState extends State<NoteDetailPage> {
   late Note _note;
+  bool _updatingDetails = false;
 
   @override
   void initState() {
@@ -48,6 +49,14 @@ class _NoteDetailPageState extends State<NoteDetailPage> {
       appBar: AppBar(
         title: Text(subject?.name ?? 'Note'),
         actions: [
+          if (_note.hasImage)
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Edit photo details',
+              onPressed: _updatingDetails
+                  ? null
+                  : () => _editPhotoDetails(context),
+            ),
           if (_note.hasImage)
             IconButton(
               icon: const Icon(Icons.drive_file_move_outline),
@@ -142,6 +151,22 @@ class _NoteDetailPageState extends State<NoteDetailPage> {
                           color: cs.onSurfaceVariant,
                         ),
                       ),
+                    const SizedBox(height: 20),
+                    Text('Additional Notes', style: theme.textTheme.titleSmall),
+                    const Divider(height: 12),
+                    if ((_note.textContent ?? '').trim().isEmpty)
+                      Text(
+                        'No additional notes.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontStyle: FontStyle.italic,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      )
+                    else
+                      SelectableText(
+                        _note.textContent!,
+                        style: theme.textTheme.bodyMedium,
+                      ),
                   ],
                 ],
               ),
@@ -229,6 +254,185 @@ class _NoteDetailPageState extends State<NoteDetailPage> {
       setState(() => _note = _note.copyWith(subjectId: target.id));
       AppSnackBar.showInfo(this.context, 'Photo moved to ${target.name}.');
     }
+
+  Future<void> _editPhotoDetails(BuildContext context) async {
+    final notesProvider = context.read<NotesProvider>();
+    final scheduleProvider = context.read<ScheduleProvider>();
+    final noteId = _note.id;
+    if (noteId == null) return;
+
+    final subjects = scheduleProvider.subjects;
+    if (subjects.isEmpty) {
+      AppSnackBar.showInfo(context, 'No subjects available.');
+      return;
+    }
+
+    final ocrController = TextEditingController(text: _note.ocrText ?? '');
+    final extraNotesController =
+        TextEditingController(text: _note.textContent ?? '');
+    Subject? selectedSubject =
+        scheduleProvider.subjectById(_note.subjectId) ?? subjects.first;
+    DateTime selectedDateTime = _note.createdAt;
+
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 8,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Edit Photo Details',
+                      style: Theme.of(ctx).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<Subject>(
+                      initialValue: selectedSubject,
+                      decoration: const InputDecoration(
+                        labelText: 'Subject',
+                        prefixIcon: Icon(Icons.school_outlined),
+                      ),
+                      items: subjects
+                          .map(
+                            (subject) => DropdownMenuItem<Subject>(
+                              value: subject,
+                              child: Text(subject.name),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setModalState(() => selectedSubject = value);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.schedule_outlined),
+                      title: const Text('Date and time'),
+                      subtitle: Text(
+                        DateFormat('EEEE, MMMM d, yyyy · HH:mm')
+                            .format(selectedDateTime),
+                      ),
+                      trailing: TextButton(
+                        onPressed: () async {
+                          final date = await showDatePicker(
+                            context: ctx,
+                            initialDate: selectedDateTime,
+                            firstDate: DateTime(2000),
+                            lastDate: DateTime(2100),
+                          );
+                          if (date == null || !ctx.mounted) return;
+                          final time = await showTimePicker(
+                            context: ctx,
+                            initialTime: TimeOfDay.fromDateTime(selectedDateTime),
+                            builder: (context, child) => MediaQuery(
+                              data: MediaQuery.of(context)
+                                  .copyWith(alwaysUse24HourFormat: true),
+                              child: child!,
+                            ),
+                          );
+                          if (time == null) return;
+                          setModalState(() {
+                            selectedDateTime = DateTime(
+                              date.year,
+                              date.month,
+                              date.day,
+                              time.hour,
+                              time.minute,
+                            );
+                          });
+                        },
+                        child: const Text('Change'),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: ocrController,
+                      minLines: 3,
+                      maxLines: 6,
+                      decoration: const InputDecoration(
+                        labelText: 'Extracted OCR text',
+                        alignLabelWithHint: true,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: extraNotesController,
+                      minLines: 3,
+                      maxLines: 6,
+                      decoration: const InputDecoration(
+                        labelText: 'Additional notes',
+                        alignLabelWithHint: true,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Save changes'),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed != true || selectedSubject?.id == null) {
+      ocrController.dispose();
+      extraNotesController.dispose();
+      return;
+    }
+
+    final normalizedOcr = ocrController.text.trim().isEmpty
+        ? null
+        : ocrController.text.trim();
+    final normalizedText = extraNotesController.text.trim().isEmpty
+        ? null
+        : extraNotesController.text.trim();
+
+    setState(() => _updatingDetails = true);
+    try {
+      await notesProvider.updateNoteDetails(
+        noteId: noteId,
+        subjectId: selectedSubject!.id!,
+        createdAt: selectedDateTime,
+        ocrText: normalizedOcr,
+        textContent: normalizedText,
+      );
+      if (!mounted) return;
+      setState(() {
+        _note = _note.copyWith(
+          subjectId: selectedSubject!.id,
+          createdAt: selectedDateTime,
+          ocrText: normalizedOcr,
+          textContent: normalizedText,
+        );
+      });
+      AppSnackBar.showInfo(this.context, 'Photo details updated.');
+    } finally {
+      if (mounted) {
+        setState(() => _updatingDetails = false);
+      }
+      ocrController.dispose();
+      extraNotesController.dispose();
+    }
+  }
 }
 
 String _photoHeroTag(Note note) {

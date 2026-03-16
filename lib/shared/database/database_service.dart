@@ -20,7 +20,7 @@ class DatabaseService {
   DatabaseService._();
 
   static const String _dbName = 'aulens.db';
-  static const int _dbVersion = 5;
+  static const int _dbVersion = 6;
 
   static const String _subjectsTable = 'subjects';
   static const String _scheduleTable = 'schedule';
@@ -64,6 +64,7 @@ class DatabaseService {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         subject_id INTEGER NOT NULL
           REFERENCES $_subjectsTable(id) ON DELETE CASCADE,
+        title TEXT,
         weekday INTEGER NOT NULL,
         start_time TEXT NOT NULL,
         end_time TEXT NOT NULL
@@ -108,6 +109,7 @@ class DatabaseService {
     }
 
     await _ensureSessionOverridesTable(db);
+    await _ensureScheduleTitleColumn(db);
 
     // Backfill new subject metadata columns.
     await _ensureSubjectMetadataColumns(db);
@@ -121,6 +123,7 @@ class DatabaseService {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           subject_id INTEGER NOT NULL
             REFERENCES $_subjectsTable(id) ON DELETE CASCADE,
+          title TEXT,
           weekday INTEGER NOT NULL,
           start_time TEXT NOT NULL,
           end_time TEXT NOT NULL
@@ -131,11 +134,19 @@ class DatabaseService {
     final hasLegacy = await _tableExists(db, _legacyScheduleTable);
     if (hasLegacy) {
       await db.execute('''
-        INSERT INTO $_scheduleTable (id, subject_id, weekday, start_time, end_time)
-        SELECT id, subject_id, weekday, start_time, end_time
+        INSERT INTO $_scheduleTable (id, subject_id, title, weekday, start_time, end_time)
+        SELECT id, subject_id, NULL, weekday, start_time, end_time
         FROM $_legacyScheduleTable
       ''');
       await db.execute('DROP TABLE $_legacyScheduleTable');
+    }
+  }
+
+  Future<void> _ensureScheduleTitleColumn(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info($_scheduleTable)');
+    final hasTitle = columns.any((row) => row['name'] == 'title');
+    if (!hasTitle) {
+      await db.execute('ALTER TABLE $_scheduleTable ADD COLUMN title TEXT');
     }
   }
 
