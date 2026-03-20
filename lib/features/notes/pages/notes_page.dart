@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../models/note.dart';
 import '../../timeline/widgets/class_timeline_view.dart';
 import '../../timeline/models/class_session.dart';
 import '../../schedule/models/subject.dart';
@@ -25,14 +26,27 @@ class NotesPage extends StatelessWidget {
           }
 
           if (schedule.subjects.isEmpty) {
-            return const _EmptyState();
+            if (notes.unclassifiedNotes().isEmpty) {
+              return const _EmptyState();
+            }
           }
+
+          final unclassified = notes.unclassifiedNotes();
 
           return ListView.builder(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            itemCount: schedule.subjects.length,
+            itemCount: schedule.subjects.length + (unclassified.isNotEmpty ? 1 : 0),
             itemBuilder: (context, i) {
-              final subject = schedule.subjects[i];
+              if (unclassified.isNotEmpty && i == 0) {
+                return _UnclassifiedExpansion(notes: unclassified);
+              }
+
+              final subjectIndex = unclassified.isNotEmpty ? i - 1 : i;
+              if (subjectIndex < 0 || subjectIndex >= schedule.subjects.length) {
+                return const SizedBox.shrink();
+              }
+
+              final subject = schedule.subjects[subjectIndex];
               final entries = schedule.entriesForSubject(subject.id!);
               final settings = context.watch<SettingsProvider>();
               final sessions = notes.sessionsForSubject(
@@ -164,5 +178,70 @@ class _SessionCountSubtitle extends StatelessWidget {
       (sum, s) => sum + s.notes.length + s.processingNotes.length,
     );
     return Text('$total item${total == 1 ? '' : 's'}');
+  }
+}
+
+class _UnclassifiedExpansion extends StatelessWidget {
+  final List<Note> notes;
+
+  const _UnclassifiedExpansion({required this.notes});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final sessions = _buildUnclassifiedSessions(notes);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ExpansionTile(
+        leading: CircleAvatar(
+          backgroundColor: cs.surfaceContainerHighest,
+          child: Icon(Icons.folder_open_outlined, color: cs.onSurfaceVariant),
+        ),
+        title: const Text(
+          'Unclassified',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text('${notes.length} item${notes.length == 1 ? '' : 's'}'),
+        childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+        children: [
+          ClassTimelineView(
+            sessions: sessions,
+            onNoteTap: (note) => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => NoteDetailPage(note: note)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<ClassSession> _buildUnclassifiedSessions(List<Note> source) {
+    if (source.isEmpty) return const <ClassSession>[];
+
+    final ordered = [...source]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final byDate = <DateTime, List<Note>>{};
+
+    for (final note in ordered) {
+      final day = DateTime(note.createdAt.year, note.createdAt.month, note.createdAt.day);
+      byDate.putIfAbsent(day, () => <Note>[]).add(note);
+    }
+
+    final days = byDate.keys.toList()..sort((a, b) => b.compareTo(a));
+    const placeholderSubject = Subject(id: -1, name: 'Unclassified');
+
+    return days
+        .map(
+          (day) => ClassSession(
+            subject: placeholderSubject,
+            date: day,
+            scheduleEntry: null,
+            notes: byDate[day]!,
+            processingNotes: const [],
+            isUnscheduled: true,
+          ),
+        )
+        .toList();
   }
 }

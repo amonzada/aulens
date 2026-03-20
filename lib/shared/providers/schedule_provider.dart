@@ -19,8 +19,16 @@ class ScheduleProvider extends ChangeNotifier {
   Map<String, SessionOverride> _overrides = {};
   bool _loading = false;
 
-  List<Subject> get subjects => List.unmodifiable(_subjects);
-  List<ScheduleEntry> get entries => List.unmodifiable(_entries);
+  List<Subject> get subjects =>
+      List.unmodifiable(_subjects.where((s) => !s.isArchived));
+  List<Subject> get archivedSubjects =>
+      List.unmodifiable(_subjects.where((s) => s.isArchived));
+  List<ScheduleEntry> get entries {
+    final activeIds = subjects.map((s) => s.id).whereType<int>().toSet();
+    return List.unmodifiable(
+      _entries.where((entry) => activeIds.contains(entry.subjectId)),
+    );
+  }
   bool get loading => _loading;
 
   bool _disposed = false;
@@ -84,6 +92,7 @@ class ScheduleProvider extends ChangeNotifier {
         name: trimmed,
         professor: normalizedProfessor,
         classroom: normalizedClassroom,
+        isArchived: false,
       ),
     ];
 
@@ -108,6 +117,30 @@ class ScheduleProvider extends ChangeNotifier {
     _safeNotify();
   }
 
+  Future<void> archiveSubject(int id) async {
+    final subject = subjectByIdIncludingArchived(id);
+    if (subject == null || subject.isArchived) return;
+    final archived = subject.copyWith(isArchived: true);
+    await _service.updateSubject(archived);
+    _subjects = [
+      for (final current in _subjects)
+        if (current.id == id) archived else current,
+    ];
+    _safeNotify();
+  }
+
+  Future<void> restoreSubject(int id) async {
+    final subject = subjectByIdIncludingArchived(id);
+    if (subject == null || !subject.isArchived) return;
+    final restored = subject.copyWith(isArchived: false);
+    await _service.updateSubject(restored);
+    _subjects = [
+      for (final current in _subjects)
+        if (current.id == id) restored else current,
+    ];
+    _safeNotify();
+  }
+
   Future<void> updateSubject({
     required int id,
     required String name,
@@ -127,6 +160,8 @@ class ScheduleProvider extends ChangeNotifier {
       name: trimmed,
       professor: normalizedProfessor,
       classroom: normalizedClassroom,
+      isArchived:
+          subjectByIdIncludingArchived(id)?.isArchived ?? false,
     );
     await _service.updateSubject(updated);
     _subjects = [
@@ -161,60 +196,28 @@ class ScheduleProvider extends ChangeNotifier {
     _safeNotify();
   }
 
-  Future<void> updateScheduleEntryTitle({
-    required int id,
-    String? title,
-  }) async {
-    final entryIndex = _entries.indexWhere((e) => e.id == id);
-    if (entryIndex == -1) return;
-
-    final current = _entries[entryIndex];
-    final normalizedTitle = title?.trim().isEmpty == true ? null : title?.trim();
-    final updated = current.copyWith(title: normalizedTitle);
-
-    await _service.updateScheduleEntry(updated);
-    _entries = [
-      for (final entry in _entries)
-        if (entry.id == id) updated else entry,
-    ];
-    _safeNotify();
-  }
-
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   /// All schedule entries that belong to [subjectId].
-  List<ScheduleEntry> entriesForSubject(int subjectId) =>
-      _entries.where((e) => e.subjectId == subjectId).toList();
-
-  String scheduleEntryLabel(ScheduleEntry entry) {
-    final explicitTitle = entry.title?.trim();
-    if (explicitTitle != null && explicitTitle.isNotEmpty) {
-      return explicitTitle;
+  List<ScheduleEntry> entriesForSubject(
+    int subjectId, {
+    bool includeArchivedSubject = false,
+  }) {
+    if (!includeArchivedSubject && subjectById(subjectId) == null) {
+      return const <ScheduleEntry>[];
     }
-
-    final sorted = entriesForSubject(entry.subjectId)
-      ..sort((a, b) {
-        final byDay = a.weekday.compareTo(b.weekday);
-        if (byDay != 0) return byDay;
-        final byStart = a.startTime.compareTo(b.startTime);
-        if (byStart != 0) return byStart;
-        return (a.id ?? 0).compareTo(b.id ?? 0);
-      });
-    final index = sorted.indexWhere((candidate) {
-      if (entry.id != null && candidate.id != null) {
-        return candidate.id == entry.id;
-      }
-      return candidate.weekday == entry.weekday &&
-          candidate.startTime == entry.startTime &&
-          candidate.endTime == entry.endTime;
-    });
-
-    final order = index >= 0 ? index + 1 : 1;
-    return 'Aula $order';
+    return _entries.where((e) => e.subjectId == subjectId).toList();
   }
 
   /// Returns the [Subject] with id == [subjectId], or `null` if not found.
   Subject? subjectById(int subjectId) {
+    for (final s in _subjects) {
+      if (s.id == subjectId && !s.isArchived) return s;
+    }
+    return null;
+  }
+
+  Subject? subjectByIdIncludingArchived(int subjectId) {
     for (final s in _subjects) {
       if (s.id == subjectId) return s;
     }
@@ -227,7 +230,7 @@ class ScheduleProvider extends ChangeNotifier {
     int postGraceMinutes = AppConstants.sessionPostGraceMinutes,
   }) =>
       TimeUtils.matchEntryForTimestamp(
-        _entries,
+        entries,
         DateTime.now(),
         preGraceMinutes: preGraceMinutes,
         postGraceMinutes: postGraceMinutes,

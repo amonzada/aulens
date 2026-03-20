@@ -45,7 +45,7 @@ class NotesProvider extends ChangeNotifier {
   // ── CRUD ───────────────────────────────────────────────────────────────────
 
   Future<Note> addPhotoNote({
-    required int subjectId,
+    required int? subjectId,
     required String imagePath,
     String? ocrText,
   }) async {
@@ -168,6 +168,10 @@ class NotesProvider extends ChangeNotifier {
   List<Note> notesForSubject(int subjectId) =>
       _notes.where((n) => n.subjectId == subjectId).toList();
 
+    /// Notes that are not assigned to any subject yet, newest first.
+    List<Note> unclassifiedNotes() =>
+      _notes.where((n) => n.subjectId == null).toList();
+
   /// Background-processing notes belonging to [subjectId], newest first.
   List<ProcessingNote> processingNotesForSubject(int subjectId) {
     final list = _processingNotes.values
@@ -264,15 +268,8 @@ class NotesProvider extends ChangeNotifier {
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
       final processing = [...bucket.processingNotes]
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-      final sessionTitle = bucket.scheduleEntry == null
-          ? 'Unscheduled'
-          : _sessionTitleForEntry(
-              bucket.scheduleEntry!,
-              scheduleEntries,
-            );
       return ClassSession(
         subject: bucket.subject,
-        title: sessionTitle,
         date: bucket.date,
         scheduleEntry: bucket.scheduleEntry,
         notes: notes,
@@ -299,36 +296,6 @@ class NotesProvider extends ChangeNotifier {
     });
 
     return list;
-  }
-
-  String _sessionTitleForEntry(
-    ScheduleEntry entry,
-    List<ScheduleEntry> allEntries,
-  ) {
-    final explicit = entry.title?.trim();
-    if (explicit != null && explicit.isNotEmpty) {
-      return explicit;
-    }
-
-    final sorted = [...allEntries]
-      ..sort((a, b) {
-        final byDay = a.weekday.compareTo(b.weekday);
-        if (byDay != 0) return byDay;
-        final byStart = a.startTime.compareTo(b.startTime);
-        if (byStart != 0) return byStart;
-        return (a.id ?? 0).compareTo(b.id ?? 0);
-      });
-    final index = sorted.indexWhere((candidate) {
-      if (entry.id != null && candidate.id != null) {
-        return candidate.id == entry.id;
-      }
-      return candidate.weekday == entry.weekday &&
-          candidate.startTime == entry.startTime &&
-          candidate.endTime == entry.endTime;
-    });
-
-    final order = index >= 0 ? index + 1 : 1;
-    return 'Aula $order';
   }
 
   DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);

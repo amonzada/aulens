@@ -2,7 +2,6 @@
 class ScheduleEntry {
   final int? id;
   final int subjectId;
-  final String? title;
 
   /// Weekday following [DateTime.weekday] convention: 1 = Monday … 7 = Sunday.
   final int weekday;
@@ -16,7 +15,6 @@ class ScheduleEntry {
   const ScheduleEntry({
     this.id,
     required this.subjectId,
-    this.title,
     required this.weekday,
     required this.startTime,
     required this.endTime,
@@ -25,7 +23,6 @@ class ScheduleEntry {
   ScheduleEntry copyWith({
     int? id,
     int? subjectId,
-    String? title,
     int? weekday,
     String? startTime,
     String? endTime,
@@ -33,7 +30,6 @@ class ScheduleEntry {
       ScheduleEntry(
         id: id ?? this.id,
         subjectId: subjectId ?? this.subjectId,
-        title: title ?? this.title,
         weekday: weekday ?? this.weekday,
         startTime: startTime ?? this.startTime,
         endTime: endTime ?? this.endTime,
@@ -42,7 +38,6 @@ class ScheduleEntry {
   /// Used for DB inserts – `id` is excluded as it is AUTOINCREMENT.
   Map<String, dynamic> toMap() => {
         'subject_id': subjectId,
-      'title': title,
         'weekday': weekday,
         'start_time': startTime,
         'end_time': endTime,
@@ -51,7 +46,6 @@ class ScheduleEntry {
   factory ScheduleEntry.fromMap(Map<String, dynamic> m) => ScheduleEntry(
         id: m['id'] as int,
         subjectId: m['subject_id'] as int,
-      title: m['title'] as String?,
         weekday: m['weekday'] as int,
         startTime: m['start_time'] as String,
         endTime: m['end_time'] as String,
@@ -59,5 +53,5 @@ class ScheduleEntry {
 
   @override
   String toString() =>
-      'ScheduleEntry(id: $id, subjectId: $subjectId, title: $title, weekday: $weekday, $startTime-$endTime)';
+      'ScheduleEntry(id: $id, subjectId: $subjectId, weekday: $weekday, $startTime-$endTime)';
 }

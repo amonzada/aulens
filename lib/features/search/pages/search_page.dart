@@ -145,8 +145,9 @@ class _ResultCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final subject =
-        context.watch<ScheduleProvider>().subjectById(note.subjectId);
+    final subject = note.subjectId != null
+      ? context.watch<ScheduleProvider>().subjectById(note.subjectId!)
+      : null;
     final dateStr = DateFormat('MMM d, yyyy').format(note.createdAt);
     final textSource = note.textContent ?? note.ocrText;
 

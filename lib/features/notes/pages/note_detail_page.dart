@@ -34,9 +34,13 @@ class _NoteDetailPageState extends State<NoteDetailPage> {
   Widget build(BuildContext context) {
     final notesProvider = context.watch<NotesProvider>();
     final schedule = context.watch<ScheduleProvider>();
-    final subject = schedule.subjectById(_note.subjectId);
-    final subjectPhotos = notesProvider
-        .notesForSubject(_note.subjectId)
+    final noteSubjectId = _note.subjectId;
+    final subject = noteSubjectId != null
+        ? schedule.subjectById(noteSubjectId)
+        : null;
+    final subjectPhotos = (noteSubjectId != null
+            ? notesProvider.notesForSubject(noteSubjectId)
+            : notesProvider.unclassifiedNotes())
         .where((n) => n.hasImage)
         .toList()
       ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
@@ -47,7 +51,7 @@ class _NoteDetailPageState extends State<NoteDetailPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(subject?.name ?? 'Note'),
+        title: Text(subject?.name ?? 'Unclassified'),
         actions: [
           if (_note.hasImage)
             IconButton(
@@ -55,18 +59,18 @@ class _NoteDetailPageState extends State<NoteDetailPage> {
               tooltip: 'Edit photo details',
               onPressed: _updatingDetails
                   ? null
-                  : () => _editPhotoDetails(context),
+                  : _editPhotoDetails,
             ),
           if (_note.hasImage)
             IconButton(
               icon: const Icon(Icons.drive_file_move_outline),
               tooltip: 'Move photo to another subject',
-              onPressed: () => _moveToAnotherSubject(context),
+              onPressed: _moveToAnotherSubject,
             ),
           IconButton(
             icon: Icon(Icons.delete_outline, color: cs.error),
             tooltip: 'Delete note',
-            onPressed: () => _confirmDelete(context),
+            onPressed: _confirmDelete,
           ),
         ],
       ),
@@ -177,7 +181,7 @@ class _NoteDetailPageState extends State<NoteDetailPage> {
     );
   }
 
-  void _confirmDelete(BuildContext context) {
+  void _confirmDelete() {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -199,8 +203,9 @@ class _NoteDetailPageState extends State<NoteDetailPage> {
             ),
             onPressed: () async {
               Navigator.pop(ctx);
-                await context.read<NotesProvider>().deleteNote(_note.id!);
-              if (context.mounted) Navigator.pop(context);
+              await context.read<NotesProvider>().deleteNote(_note.id!);
+              if (!mounted) return;
+              Navigator.pop(context);
             },
             child: const Text('Delete'),
           ),
@@ -209,7 +214,7 @@ class _NoteDetailPageState extends State<NoteDetailPage> {
     );
   }
 
-    Future<void> _moveToAnotherSubject(BuildContext context) async {
+    Future<void> _moveToAnotherSubject() async {
       final scheduleProvider = context.read<ScheduleProvider>();
       final notesProvider = context.read<NotesProvider>();
 
@@ -252,10 +257,10 @@ class _NoteDetailPageState extends State<NoteDetailPage> {
 
       if (!mounted) return;
       setState(() => _note = _note.copyWith(subjectId: target.id));
-      AppSnackBar.showInfo(this.context, 'Photo moved to ${target.name}.');
+      AppSnackBar.showInfo(context, 'Photo moved to ${target.name}.');
     }
 
-  Future<void> _editPhotoDetails(BuildContext context) async {
+  Future<void> _editPhotoDetails() async {
     final notesProvider = context.read<NotesProvider>();
     final scheduleProvider = context.read<ScheduleProvider>();
     final noteId = _note.id;
@@ -271,7 +276,10 @@ class _NoteDetailPageState extends State<NoteDetailPage> {
     final extraNotesController =
         TextEditingController(text: _note.textContent ?? '');
     Subject? selectedSubject =
-        scheduleProvider.subjectById(_note.subjectId) ?? subjects.first;
+      (_note.subjectId != null
+        ? scheduleProvider.subjectById(_note.subjectId!)
+        : null) ??
+        subjects.first;
     DateTime selectedDateTime = _note.createdAt;
 
     final confirmed = await showModalBottomSheet<bool>(
@@ -399,6 +407,12 @@ class _NoteDetailPageState extends State<NoteDetailPage> {
       return;
     }
 
+    if (!mounted) {
+      ocrController.dispose();
+      extraNotesController.dispose();
+      return;
+    }
+
     final normalizedOcr = ocrController.text.trim().isEmpty
         ? null
         : ocrController.text.trim();
@@ -424,7 +438,7 @@ class _NoteDetailPageState extends State<NoteDetailPage> {
           textContent: normalizedText,
         );
       });
-      AppSnackBar.showInfo(this.context, 'Photo details updated.');
+      AppSnackBar.showInfo(context, 'Photo details updated.');
     } finally {
       if (mounted) {
         setState(() => _updatingDetails = false);

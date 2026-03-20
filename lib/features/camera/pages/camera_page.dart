@@ -51,6 +51,10 @@ class _CameraPageState extends State<CameraPage> {
   // ── Capture flow ───────────────────────────────────────────────────────────
 
   Future<void> _capture() async {
+    if (_state == _CaptureState.processing || _saving) {
+      return;
+    }
+
     // Capture the provider reference before any async gap.
     final scheduleProvider = context.read<ScheduleProvider>();
     final settings = context.read<SettingsProvider>();
@@ -103,25 +107,7 @@ class _CameraPageState extends State<CameraPage> {
             now,
           )
         : null;
-    final subject = widget.fixedSubject ??
-        detected ??
-        (scheduleProvider.subjects.isNotEmpty
-            ? scheduleProvider.subjects.first
-            : null);
-
-    if (subject == null) {
-      await CameraService.instance.deleteCapturedPhotoIfOwned(path);
-      if (!mounted) return;
-      setState(() {
-        _state = _CaptureState.idle;
-        _saving = false;
-      });
-      AppSnackBar.showInfo(
-        context,
-        'No subjects found. Add subjects in the Schedule tab first.',
-      );
-      return;
-    }
+    final subject = widget.fixedSubject ?? detected;
 
     await _saveCaptured(
       imagePath: path,
@@ -136,17 +122,13 @@ class _CameraPageState extends State<CameraPage> {
 
   Future<void> _saveCaptured({
     required String imagePath,
-    required Subject selectedSubject,
+    required Subject? selectedSubject,
     required Subject? detectedSubject,
     required ScheduleEntry? entry,
     required DateTime capturedAt,
   }) async {
     if (_saving) return;
-    final subjectId = selectedSubject.id;
-    if (subjectId == null) {
-      AppSnackBar.showError(context, 'Subject is not ready yet.');
-      return;
-    }
+    final subjectId = selectedSubject?.id;
     final notesProvider = context.read<NotesProvider>();
     final scheduleProvider = context.read<ScheduleProvider>();
 
@@ -159,6 +141,7 @@ class _CameraPageState extends State<CameraPage> {
       );
 
       if (entry != null &&
+          subjectId != null &&
           detectedSubject != null &&
           detectedSubject.id != subjectId) {
         final entryId = entry.id;
@@ -172,7 +155,7 @@ class _CameraPageState extends State<CameraPage> {
       }
 
       CameraService.instance.enqueueBackgroundOcr(
-        subjectId: subjectId,
+        subjectId: subjectId ?? -1,
         imagePath: imagePath,
         createdAt: DateTime.now(),
         runOcr: OcrService.instance.extractText,
@@ -191,6 +174,10 @@ class _CameraPageState extends State<CameraPage> {
 
     if (!mounted) return;
     _resetToIdle();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _capture();
+    });
   }
 
   void _resetToIdle() => setState(() {

@@ -27,7 +27,10 @@ class SubjectTimelinePage extends StatelessWidget {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final entries = schedule.entriesForSubject(subject.id!);
+          final entries = schedule.entriesForSubject(
+            subject.id!,
+            includeArchivedSubject: subject.isArchived,
+          );
           final sessions = notes.sessionsForSubject(
             subject: subject,
             scheduleEntries: entries,

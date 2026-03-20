@@ -115,46 +115,6 @@ class _AddSubjectPageState extends State<AddSubjectPage> {
     );
   }
 
-  Future<void> _editScheduleLabel(
-    BuildContext context,
-    ScheduleProvider provider,
-    ScheduleEntry entry,
-  ) async {
-    final controller = TextEditingController(text: entry.title ?? '');
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit class label'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Label',
-            hintText: 'Aula 1',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true && mounted) {
-      await provider.updateScheduleEntryTitle(
-        id: entry.id!,
-        title: controller.text,
-      );
-    }
-    controller.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<ScheduleProvider>();
@@ -256,30 +216,14 @@ class _AddSubjectPageState extends State<AddSubjectPage> {
                         dense: true,
                         leading: const Icon(Icons.schedule_outlined),
                         title: Text(
-                          provider.scheduleEntryLabel(entry),
-                        ),
-                        subtitle: Text(
                           '${AppConstants.weekdayNames[entry.weekday - 1]} · ${entry.startTime} – ${entry.endTime}',
                         ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              tooltip: 'Edit label',
-                              onPressed: _saving
-                                  ? null
-                                  : () =>
-                                      _editScheduleLabel(context, provider, entry),
-                              icon: const Icon(Icons.edit_outlined),
-                            ),
-                            IconButton(
-                              tooltip: 'Delete schedule',
-                              onPressed: _saving
-                                  ? null
-                                  : () => provider.deleteScheduleEntry(entry.id!),
-                              icon: const Icon(Icons.delete_outline),
-                            ),
-                          ],
+                        trailing: IconButton(
+                          tooltip: 'Delete schedule',
+                          onPressed: _saving
+                              ? null
+                              : () => provider.deleteScheduleEntry(entry.id!),
+                          icon: const Icon(Icons.delete_outline),
                         ),
                       ),
                     ),

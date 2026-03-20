@@ -1,9 +1,9 @@
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
-import '../../features/schedule/models/subject.dart';
-import '../../features/schedule/models/schedule_entry.dart';
 import '../../features/notes/models/note.dart';
+import '../../features/schedule/models/schedule_entry.dart';
+import '../../features/schedule/models/subject.dart';
 
 /// Singleton SQLite service for Aulens.
 ///
@@ -20,7 +20,7 @@ class DatabaseService {
   DatabaseService._();
 
   static const String _dbName = 'aulens.db';
-  static const int _dbVersion = 6;
+  static const int _dbVersion = 8;
 
   static const String _subjectsTable = 'subjects';
   static const String _scheduleTable = 'schedule';
@@ -55,7 +55,8 @@ class DatabaseService {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         professor TEXT,
-        classroom TEXT
+        classroom TEXT,
+        is_archived INTEGER NOT NULL DEFAULT 0
       )
     ''');
 
@@ -74,7 +75,7 @@ class DatabaseService {
     await db.execute('''
       CREATE TABLE $_notesTable (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        subject_id INTEGER NOT NULL
+        subject_id INTEGER
           REFERENCES $_subjectsTable(id) ON DELETE CASCADE,
         note_type TEXT NOT NULL DEFAULT 'photo',
         image_path TEXT,
@@ -113,6 +114,15 @@ class DatabaseService {
 
     // Backfill new subject metadata columns.
     await _ensureSubjectMetadataColumns(db);
+    await _ensureSubjectArchiveColumn(db);
+
+    if (oldVersion < 7) {
+      await _migrateNotesSubjectNullable(db);
+    }
+
+    if (oldVersion < 8) {
+      await _ensureSubjectArchiveColumn(db);
+    }
   }
 
   Future<void> _migrateScheduleEntriesToSchedule(Database db) async {
@@ -191,7 +201,7 @@ class DatabaseService {
       await db.execute('''
         CREATE TABLE $_notesTable (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
-          subject_id INTEGER NOT NULL
+          subject_id INTEGER
             REFERENCES $_subjectsTable(id) ON DELETE CASCADE,
           note_type TEXT NOT NULL DEFAULT 'photo',
           image_path TEXT,
@@ -206,7 +216,7 @@ class DatabaseService {
     await db.execute('''
       CREATE TABLE notes_new (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        subject_id INTEGER NOT NULL
+        subject_id INTEGER
           REFERENCES $_subjectsTable(id) ON DELETE CASCADE,
         note_type TEXT NOT NULL DEFAULT 'photo',
         image_path TEXT,
@@ -226,6 +236,44 @@ class DatabaseService {
     await db.execute('ALTER TABLE notes_new RENAME TO $_notesTable');
   }
 
+  Future<void> _migrateNotesSubjectNullable(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info($_notesTable)');
+    final subjectIdColumn = columns.firstWhere(
+      (row) => row['name'] == 'subject_id',
+      orElse: () => const <String, Object?>{},
+    );
+    if (subjectIdColumn.isEmpty) {
+      return;
+    }
+
+    final isNotNull = (subjectIdColumn['notnull'] as int?) == 1;
+    if (!isNotNull) {
+      return;
+    }
+
+    await db.execute('''
+      CREATE TABLE notes_new_nullable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        subject_id INTEGER
+          REFERENCES $_subjectsTable(id) ON DELETE CASCADE,
+        note_type TEXT NOT NULL DEFAULT 'photo',
+        image_path TEXT,
+        ocr_text TEXT,
+        text_content TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      INSERT INTO notes_new_nullable (id, subject_id, note_type, image_path, ocr_text, text_content, created_at)
+      SELECT id, subject_id, note_type, image_path, ocr_text, text_content, created_at
+      FROM $_notesTable
+    ''');
+
+    await db.execute('DROP TABLE $_notesTable');
+    await db.execute('ALTER TABLE notes_new_nullable RENAME TO $_notesTable');
+  }
+
   Future<void> _ensureSubjectMetadataColumns(Database db) async {
     final columns = await db.rawQuery('PRAGMA table_info($_subjectsTable)');
     final hasProfessor = columns.any((row) => row['name'] == 'professor');
@@ -237,6 +285,16 @@ class DatabaseService {
 
     if (!hasClassroom) {
       await db.execute('ALTER TABLE $_subjectsTable ADD COLUMN classroom TEXT');
+    }
+  }
+
+  Future<void> _ensureSubjectArchiveColumn(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info($_subjectsTable)');
+    final hasArchived = columns.any((row) => row['name'] == 'is_archived');
+    if (!hasArchived) {
+      await db.execute(
+        'ALTER TABLE $_subjectsTable ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0',
+      );
     }
   }
 

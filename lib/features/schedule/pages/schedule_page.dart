@@ -12,6 +12,7 @@ import '../../settings/pages/settings_page.dart';
 import '../models/schedule_entry.dart';
 import '../models/subject.dart';
 import '../../class_mode/pages/class_mode_page.dart';
+import 'archived_subjects_page.dart';
 import 'add_subject_page.dart';
 
 /// Main schedule screen – displays subjects and their weekly time slots.
@@ -28,6 +29,11 @@ class SchedulePage extends StatelessWidget {
             icon: const Icon(Icons.record_voice_over_outlined),
             tooltip: 'Class mode',
             onPressed: () => _openClassModeManual(context),
+          ),
+          IconButton(
+            icon: const Icon(Icons.archive_outlined),
+            tooltip: 'Archived subjects',
+            onPressed: () => _openArchivedSubjects(context),
           ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
@@ -76,7 +82,6 @@ class SchedulePage extends StatelessWidget {
               _ScheduleBlockItem(
                 subject: subject,
                 entry: entry,
-                entryLabel: provider.scheduleEntryLabel(entry),
               ),
             );
           }
@@ -93,6 +98,8 @@ class SchedulePage extends StatelessWidget {
                       .toList(),
                   onOpenSubject: (subject) => _openSubjectTimeline(context, subject),
                   onEditSubject: (subject) => _pushEditSubject(context, subject),
+                    onArchiveSubject: (subject) =>
+                      _confirmArchiveSubject(context, provider, subject),
                   onDeleteSubject: (subject) =>
                       _confirmDeleteSubject(context, provider, subject),
                 ),
@@ -115,6 +122,8 @@ class SchedulePage extends StatelessWidget {
                         _openSubjectTimeline(context, subject),
                       onEditSubject: (subject) =>
                           _pushEditSubject(context, subject),
+                        onArchiveSubject: (subject) =>
+                          _confirmArchiveSubject(context, provider, subject),
                       onDeleteSubject: (subject) =>
                           _confirmDeleteSubject(context, provider, subject),
                     ),
@@ -137,6 +146,11 @@ class SchedulePage extends StatelessWidget {
   void _openSettings(BuildContext context) => Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const SettingsPage()),
+      );
+
+  void _openArchivedSubjects(BuildContext context) => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const ArchivedSubjectsPage()),
       );
 
   Future<void> _openClassModeManual(BuildContext context) async {
@@ -221,6 +235,38 @@ class SchedulePage extends StatelessWidget {
       ),
     );
   }
+
+  void _confirmArchiveSubject(
+    BuildContext context,
+    ScheduleProvider provider,
+    Subject subject,
+  ) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Archive Subject'),
+        content: Text(
+          'Archive "${subject.name}"?\n'
+          'Notes, photos and schedule will be preserved and can be restored later.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await provider.archiveSubject(subject.id!);
+              if (!context.mounted) return;
+              AppSnackBar.showInfo(context, 'Subject archived.');
+            },
+            child: const Text('Archive'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ── Empty state ───────────────────────────────────────────────────────────────
@@ -267,14 +313,13 @@ class _EmptyState extends StatelessWidget {
 class _ScheduleBlockItem {
   final Subject subject;
   final ScheduleEntry? entry;
-  final String? entryLabel;
 
-  const _ScheduleBlockItem({required this.subject, this.entry, this.entryLabel});
+  const _ScheduleBlockItem({required this.subject, this.entry});
 
   bool get isUnscheduled => entry == null;
 }
 
-enum _SubjectMenuAction { edit, delete }
+enum _SubjectMenuAction { edit, archive, delete }
 
 class _SectionHeader extends StatelessWidget {
   final String title;
@@ -297,12 +342,14 @@ class _ScheduleGridSection extends StatelessWidget {
   final List<_ScheduleBlockItem> items;
   final ValueChanged<Subject> onOpenSubject;
   final ValueChanged<Subject> onEditSubject;
+  final ValueChanged<Subject> onArchiveSubject;
   final ValueChanged<Subject> onDeleteSubject;
 
   const _ScheduleGridSection({
     required this.items,
     required this.onOpenSubject,
     required this.onEditSubject,
+    required this.onArchiveSubject,
     required this.onDeleteSubject,
   });
 
@@ -324,6 +371,7 @@ class _ScheduleGridSection extends StatelessWidget {
           item: item,
           onTap: () => onOpenSubject(item.subject),
           onEditSubject: () => onEditSubject(item.subject),
+          onArchiveSubject: () => onArchiveSubject(item.subject),
           onDeleteSubject: () => onDeleteSubject(item.subject),
         );
       },
@@ -335,12 +383,14 @@ class _ScheduleBlockCard extends StatelessWidget {
   final _ScheduleBlockItem item;
   final VoidCallback onTap;
   final VoidCallback onEditSubject;
+  final VoidCallback onArchiveSubject;
   final VoidCallback onDeleteSubject;
 
   const _ScheduleBlockCard({
     required this.item,
     required this.onTap,
     required this.onEditSubject,
+    required this.onArchiveSubject,
     required this.onDeleteSubject,
   });
 
@@ -371,7 +421,7 @@ class _ScheduleBlockCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      item.entryLabel ?? item.subject.name,
+                      item.subject.name,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleSmall?.copyWith(
@@ -386,6 +436,9 @@ class _ScheduleBlockCard extends StatelessWidget {
                         case _SubjectMenuAction.edit:
                           onEditSubject();
                           return;
+                        case _SubjectMenuAction.archive:
+                          onArchiveSubject();
+                          return;
                         case _SubjectMenuAction.delete:
                           onDeleteSubject();
                           return;
@@ -395,6 +448,10 @@ class _ScheduleBlockCard extends StatelessWidget {
                       const PopupMenuItem(
                         value: _SubjectMenuAction.edit,
                         child: Text('Edit subject'),
+                      ),
+                      const PopupMenuItem(
+                        value: _SubjectMenuAction.archive,
+                        child: Text('Archive subject'),
                       ),
                       PopupMenuItem(
                         value: _SubjectMenuAction.delete,
@@ -406,10 +463,6 @@ class _ScheduleBlockCard extends StatelessWidget {
                     ],
                     icon: const Icon(Icons.more_horiz, size: 18),
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 24,
-                      height: 24,
-                    ),
                   ),
                 ],
               ),

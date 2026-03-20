@@ -5,18 +5,19 @@ import 'package:intl/intl.dart';
 
 import '../../notes/models/note.dart';
 import '../models/class_session.dart';
-import '../models/photo_group.dart';
 
 /// Session-first notes layout:
-/// Class session -> Photo groups -> Text notes.
+/// Class session -> time-based note groups (photos and text).
 class ClassTimelineView extends StatelessWidget {
   final List<ClassSession> sessions;
   final ValueChanged<Note>? onNoteTap;
+  final bool autoExpandMostRecent;
 
   const ClassTimelineView({
     super.key,
     required this.sessions,
     this.onNoteTap,
+    this.autoExpandMostRecent = true,
   });
 
   @override
@@ -26,9 +27,14 @@ class ClassTimelineView extends StatelessWidget {
     }
 
     return Column(
-      children: sessions
-          .map((session) => _SessionCard(session: session, onNoteTap: onNoteTap))
-          .toList(),
+      children: [
+        for (var i = 0; i < sessions.length; i++)
+          _SessionCard(
+            session: sessions[i],
+            onNoteTap: onNoteTap,
+            initiallyExpanded: autoExpandMostRecent && i == 0,
+          ),
+      ],
     );
   }
 }
@@ -36,8 +42,13 @@ class ClassTimelineView extends StatelessWidget {
 class _SessionCard extends StatelessWidget {
   final ClassSession session;
   final ValueChanged<Note>? onNoteTap;
+  final bool initiallyExpanded;
 
-  const _SessionCard({required this.session, required this.onNoteTap});
+  const _SessionCard({
+    required this.session,
+    required this.onNoteTap,
+    required this.initiallyExpanded,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -50,112 +61,105 @@ class _SessionCard extends StatelessWidget {
 
     final sortedNotes = [...session.notes]
       ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-    final photoGroups = _collectPhotoGroups(session, sortedNotes);
-    final textNotes = sortedNotes.where((n) => n.isTextNote).toList();
+    final groupedNotes = _collectGroupedNotes(sortedNotes);
+    final photoNotesCount = sortedNotes.where((n) => n.hasImage).length;
+    final textNotesCount = sortedNotes.where((n) => n.isTextNote).length;
+    final totalNotesCount = sortedNotes.length;
+    final summaryLabel = '$totalNotesCount note${totalNotesCount == 1 ? '' : 's'}';
     final failedProcessing =
         session.processingNotes.where((p) => p.failed).toList(growable: false);
 
     return Container(
       margin: const EdgeInsets.fromLTRB(8, 8, 8, 12),
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: cs.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: cs.outlineVariant),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.event_note, size: 16, color: cs.primary),
-              const SizedBox(width: 8),
-              Expanded(
+      child: Theme(
+        data: theme.copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          key: PageStorageKey<String>(
+            'session-${session.date.toIso8601String()}-${session.startTime ?? 'unscheduled'}-${session.endTime ?? ''}',
+          ),
+          initiallyExpanded: initiallyExpanded,
+          tilePadding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          leading: Icon(Icons.event_note, size: 16, color: cs.primary),
+          title: Text(
+            dateLabel,
+            style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          subtitle: Text(
+            '$timeLabel  •  $summaryLabel',
+            style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+          children: [
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                _CountChip(
+                  icon: Icons.photo_library_outlined,
+                  label: '$photoNotesCount photo${photoNotesCount == 1 ? '' : 's'}',
+                ),
+                _CountChip(
+                  icon: Icons.notes_outlined,
+                  label: '$textNotesCount text note${textNotesCount == 1 ? '' : 's'}',
+                ),
+                _CountChip(
+                  icon: Icons.view_timeline_outlined,
+                  label: '${groupedNotes.length} group${groupedNotes.length == 1 ? '' : 's'}',
+                ),
+              ],
+            ),
+            if (groupedNotes.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              _SectionTitle(title: 'Grouped Notes'),
+              const SizedBox(height: 8),
+              ...groupedNotes.map(
+                (group) => _GroupedNotesCard(group: group, onNoteTap: onNoteTap),
+              ),
+            ],
+            if (groupedNotes.isEmpty && failedProcessing.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
                 child: Text(
-                  '${session.title} · $dateLabel',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w700),
+                  'No notes in this session.',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: cs.onSurfaceVariant),
                 ),
               ),
+            if (failedProcessing.isNotEmpty) ...[
+              const SizedBox(height: 12),
               Text(
-                timeLabel,
-                style: theme.textTheme.labelMedium
-                    ?.copyWith(color: cs.onSurfaceVariant),
+                'Some OCR jobs failed. You can retake these photos from Camera.',
+                style: theme.textTheme.bodySmall?.copyWith(color: cs.error),
               ),
             ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: [
-              _CountChip(
-                icon: Icons.photo_library_outlined,
-                label: '${photoGroups.length} photo group${photoGroups.length == 1 ? '' : 's'}',
-              ),
-              _CountChip(
-                icon: Icons.notes_outlined,
-                label: '${textNotes.length} text note${textNotes.length == 1 ? '' : 's'}',
-              ),
-            ],
-          ),
-          if (photoGroups.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            _SectionTitle(title: 'Photo Groups'),
-            const SizedBox(height: 8),
-            ...photoGroups.map(
-              (group) => _PhotoGroupCard(group: group, onNoteTap: onNoteTap),
-            ),
           ],
-          if (textNotes.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            _SectionTitle(title: 'Text Notes'),
-            const SizedBox(height: 8),
-            ...textNotes.map(
-              (note) => _TextNoteTile(note: note, onNoteTap: onNoteTap),
-            ),
-          ],
-          if (photoGroups.isEmpty && textNotes.isEmpty && failedProcessing.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                'No notes in this session.',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: cs.onSurfaceVariant),
-              ),
-            ),
-          if (failedProcessing.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(
-              'Some OCR jobs failed. You can retake these photos from Camera.',
-              style: theme.textTheme.bodySmall?.copyWith(color: cs.error),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
 }
 
-List<PhotoGroup> _collectPhotoGroups(ClassSession session, List<Note> notes) {
+List<_NoteGroup> _collectGroupedNotes(List<Note> notes) {
   const groupWindow = Duration(minutes: 2);
-  final groups = <PhotoGroup>[];
+  final groups = <_NoteGroup>[];
+  if (notes.isEmpty) return groups;
+
   int i = 0;
 
   while (i < notes.length) {
     final current = notes[i];
-    if (current.isTextNote) {
-      i += 1;
-      continue;
-    }
-
     final grouped = <Note>[current];
     var last = current;
     var j = i + 1;
 
     while (j < notes.length) {
       final candidate = notes[j];
-      if (candidate.isTextNote) break;
       if (candidate.createdAt.difference(last.createdAt) <= groupWindow) {
         grouped.add(candidate);
         last = candidate;
@@ -166,10 +170,9 @@ List<PhotoGroup> _collectPhotoGroups(ClassSession session, List<Note> notes) {
     }
 
     groups.add(
-      PhotoGroup(
-        subject: session.subject,
+      _NoteGroup(
         timestamp: grouped.first.createdAt,
-        photos: grouped,
+        notes: grouped,
       ),
     );
 
@@ -177,6 +180,24 @@ List<PhotoGroup> _collectPhotoGroups(ClassSession session, List<Note> notes) {
   }
 
   return groups;
+}
+
+class _NoteGroup {
+  final DateTime timestamp;
+  final List<Note> notes;
+
+  const _NoteGroup({required this.timestamp, required this.notes});
+
+  int get photoCount => notes.where((n) => n.hasImage).length;
+  int get textCount => notes.where((n) => n.isTextNote).length;
+
+  String? get coverImagePath {
+    for (final note in notes) {
+      final path = note.imagePath;
+      if (path != null && path.trim().isNotEmpty) return path;
+    }
+    return null;
+  }
 }
 
 class _SectionTitle extends StatelessWidget {
@@ -225,18 +246,27 @@ class _CountChip extends StatelessWidget {
   }
 }
 
-class _PhotoGroupCard extends StatelessWidget {
-  final PhotoGroup group;
+class _GroupedNotesCard extends StatelessWidget {
+  final _NoteGroup group;
   final ValueChanged<Note>? onNoteTap;
 
-  const _PhotoGroupCard({required this.group, required this.onNoteTap});
+  const _GroupedNotesCard({required this.group, required this.onNoteTap});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final count = group.photos.length;
     final label = DateFormat('HH:mm').format(group.timestamp);
-    final cover = group.photos.first.imagePath;
+    final count = group.notes.length;
+    final photoCount = group.photoCount;
+    final textCount = group.textCount;
+    final cover = group.coverImagePath;
+
+    final countParts = <String>[];
+    if (photoCount > 0) countParts.add('$photoCount photo${photoCount == 1 ? '' : 's'}');
+    if (textCount > 0) countParts.add('$textCount text${textCount == 1 ? '' : 's'}');
+    final summary = countParts.isEmpty
+        ? '$count item${count == 1 ? '' : 's'}'
+        : countParts.join(' • ');
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -268,7 +298,7 @@ class _PhotoGroupCard extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  '$label  •  $count photo${count == 1 ? '' : 's'}',
+                  '$label  •  $summary',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),
@@ -281,7 +311,7 @@ class _PhotoGroupCard extends StatelessWidget {
   }
 
   Future<void> _showGroupSheet(BuildContext context) async {
-    final ordered = [...group.photos]
+    final ordered = [...group.notes]
       ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
     await showModalBottomSheet<void>(
@@ -295,8 +325,17 @@ class _PhotoGroupCard extends StatelessWidget {
             final note = ordered[index];
             final time = DateFormat('HH:mm').format(note.createdAt);
             return ListTile(
-              leading: const Icon(Icons.photo_outlined),
-              title: Text('Photo $time'),
+              leading: Icon(
+                note.hasImage ? Icons.photo_outlined : Icons.note_alt_outlined,
+              ),
+              title: Text(note.hasImage ? 'Photo $time' : 'Text note $time'),
+              subtitle: note.isTextNote
+                  ? Text(
+                      _snippetText(note.textContent) ?? 'No text available.',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    )
+                  : null,
               onTap: () {
                 Navigator.pop(context);
                 if (onNoteTap != null) onNoteTap!(note);
@@ -304,34 +343,6 @@ class _PhotoGroupCard extends StatelessWidget {
             );
           },
         ),
-      ),
-    );
-  }
-}
-
-class _TextNoteTile extends StatelessWidget {
-  final Note note;
-  final ValueChanged<Note>? onNoteTap;
-
-  const _TextNoteTile({required this.note, required this.onNoteTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final preview = _snippetText(note.textContent) ?? 'No text available.';
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        tileColor: Theme.of(context).colorScheme.surfaceContainerLow,
-        leading: const Icon(Icons.note_alt_outlined),
-        title: Text(DateFormat('HH:mm').format(note.createdAt)),
-        subtitle: Text(
-          preview,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        onTap: onNoteTap == null ? null : () => onNoteTap!(note),
       ),
     );
   }

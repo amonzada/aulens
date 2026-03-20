@@ -55,6 +55,16 @@ class SettingsPage extends StatelessWidget {
             value: settings.savePhotosToGallery,
             onChanged: settings.updateSavePhotosToGallery,
           ),
+          const SizedBox(height: 28),
+          Center(
+            child: Text(
+              'Made with care by Amon',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
         ],
       ),
     );

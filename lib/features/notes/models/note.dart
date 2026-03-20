@@ -17,7 +17,7 @@ extension NoteTypeDb on NoteType {
 /// A note linked to a [Subject]. It can be a photo note or a text note.
 class Note {
   final int? id;
-  final int subjectId;
+  final int? subjectId;
   final NoteType noteType;
 
   /// Absolute path to the image file stored in app documents directory.
@@ -76,7 +76,7 @@ class Note {
 
   factory Note.fromMap(Map<String, dynamic> m) => Note(
         id: m['id'] as int,
-        subjectId: m['subject_id'] as int,
+        subjectId: m['subject_id'] as int?,
         noteType: NoteTypeDb.fromDb(
           (m['note_type'] as String?) ?? 'photo',
         ),
